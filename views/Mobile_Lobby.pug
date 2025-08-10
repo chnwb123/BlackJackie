@@ -1,0 +1,50 @@
+html
+    head
+        title= title
+        link(rel="stylesheet", href="/css/Mobile_Lobby.css")
+        script(src="https://code.jquery.com/jquery-3.6.0.min.js")
+    body
+        .lobby-container
+            h2 Mobile Lobby Page
+            h3 Hi, #{studentUsername}! Pick a name for your player.
+            form(method="post", action=`/Mobile_Lobby?sessionId=${sessionId}`)
+                input#playerName(type="text", name="playerName", placeholder="Enter your name", required)
+                button#submitBtn(type="submit") Continue
+            div#lobbyMsg
+            script.
+                $(function() {
+                    const $input = $('#playerName');
+                    const $button = $('#submitBtn');
+                    const $msg = $('#lobbyMsg');
+                    const sessionId = "#{sessionId}";
+
+                    function validate() {
+                        const val = $input.val().trim();
+                        $msg.text('');
+                        if (!val) {
+                            $input.css('background', '#ff7f6e');
+                            $button.prop('disabled', true);
+                            return;
+                        }
+                        $.get('/checkPlayerName', { sessionId, playerName: val }, function(data) {
+                            if (data.playerCount >= 5) {
+                                $input.css('background', '#ff7f6e');
+                                $button.prop('disabled', true);
+                                $msg.text('Lobby is full!');
+                            } else if (!data.available) {
+                                $input.css('background', '#ff7f6e');
+                                $button.prop('disabled', true);
+                                $msg.text('Name is already taken!');
+                            } else {
+                                $input.css('background', '');
+                                $button.prop('disabled', false);
+                                $msg.text('');
+                            }
+                        });
+                    }
+
+                    $input.on('input', validate);
+                    $input.on('blur', validate);
+                    // Initial state
+                    $button.prop('disabled', true);
+                });

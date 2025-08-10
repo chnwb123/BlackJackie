@@ -1,0 +1,48 @@
+body {
+    background: radial-gradient(circle at 50% 30%, #357a38 60%, #1b5e20 100%);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+
+form {
+    background: rgba(255,255,255,0.08);
+    padding: 40px 60px;
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+button[type="submit"] {
+    background: linear-gradient(90deg, #ffd700 0%, #ff9800 100%);
+    color: #222;
+    font-size: 1.3rem;
+    font-weight: bold;
+    border: none;
+    border-radius: 8px;
+    padding: 16px 40px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    transition: background 0.2s, transform 0.2s;
+}
+
+button[type="submit"]:hover {
+    background: linear-gradient(90deg, #ff9800 0%, #ffd700 100%);
+    transform: scale(1.05);
+}
+
+.card-title {
+    font-family: 'Playfair Display', 'Georgia', serif;
+    font-size: 3rem;
+    color: #ffd700;
+    text-shadow: 2px 2px 8px #222, 0 0 18px #ff9800;
+    letter-spacing: 2px;
+    margin-bottom: 32px;
+    margin-top: 0;
+    text-align: center;
+}

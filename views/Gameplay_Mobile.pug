@@ -1,0 +1,1605 @@
+html
+    head
+        title= title
+        meta(name="viewport", content="width=device-width, initial-scale=1.0")
+        script(src="https://cdn.socket.io/4.5.4/socket.io.min.js")
+        script(src="https://unpkg.com/jsqr/dist/jsQR.js")
+        link(rel="stylesheet", href="/css/Gameplay_Mobile.css")
+
+    body
+        .mobile-container
+            div#gameContainer Loading...
+
+        script.
+            const socket = io();
+            const sessionId = '#{sessionId}';
+            const playerName = '#{playerName}';
+            const username = '#{studentUsername}';
+            
+            let isScanning = false;
+            let scannedCards = [];
+            let scanStream = null;
+            let isDealer = false;
+            let selectedAnswerOption = null;
+            let currentRound = 1;
+            let gameCurrentRound = 1;
+
+            socket.emit('gameplayMobile', { sessionId: sessionId, playerName: playerName, username: username });
+
+            socket.on('mobileGameplayData', (data) => {
+                console.log('📱 Received playerJoined data:', data);
+
+                if (data.players) {
+                    const myPlayer = data.players.find(p => p.name === playerName);
+                    isDealer = myPlayer ? myPlayer.isDealer : false;
+                } else {
+                    isDealer = false;
+                }
+                
+                console.log(`Player ${playerName} is ${isDealer ? 'DEALER' : 'PLAYER'}`);
+                showWaitingForGame();
+            });
+            
+            // Listen for QR scanning start
+            socket.on('qrScanningStarted', (data) => {
+                startQRScanning(data);
+            });
+            
+            function showWaitingForGame() {
+                document.getElementById('gameContainer').innerHTML = `
+                    <div style="text-align: center; padding: 50px;">
+                        <h2>🎯 Ready to Play!</h2>
+                        <p><strong>Player:</strong> ${playerName}</p>
+                        <p><strong>Role:</strong> ${isDealer ? '👑 Dealer' : '🎮 Player'}</p>
+                        <p>Waiting for the game to begin...</p>
+                    </div>
+                `;
+            }
+
+            function startQRScanning(scanData) {
+                isScanning = true;    
+                scannedCards = [];
+
+                const roleClass = isDealer ? 'dealer-mode' : 'player-mode';
+                const specialInstruction = isDealer ? 
+                    scanData.specialInstructions.dealer : 
+                    scanData.specialInstructions.players;
+                
+                document.getElementById('gameContainer').innerHTML = `
+                    <div class="qr-scanner-container ${roleClass}">
+                        <div style="text-align: center; margin-bottom: 20px;">
+                            <h2>📱 Scan Your Cards</h2>
+                            <p><strong>Role:</strong> ${isDealer ? '👑 Dealer' : '🎮 Player'}</p>
+                            <p>${specialInstruction}</p>
+                            <p>Cards scanned: <span id="scannedCount">0</span>/${scanData.cardsPerPlayer}</p>
+                        </div>
+                        
+                        <div class="camera-area">
+                            <video id="qr-video" autoplay playsinline muted></video>
+                            <canvas id="qr-canvas"></canvas>
+                            <div class="scan-box"></div>
+                            <p>Point camera at QR code</p>
+                        </div>
+                        
+                        <div id="scannedCards" style="margin: 20px 0; text-align: center;">
+                            <h4>Your Scanned Cards:</h4>
+                        </div>
+                        
+                        <div style="text-align: center; margin-top: 20px;">
+                            <button class="btn btn-primary" onclick="startCamera()">📷 Start Camera</button>
+                            <button class="btn btn-success" id="finishScanning" style="display:none;" onclick="finishScanning()">
+                                ${isDealer ? '🎯 Ready to Distribute' : ' Scanning Complete'}
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            function startCamera() {
+                const video = document.getElementById('qr-video');
+                
+                navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' }
+                })
+                .then(stream => {
+                    scanStream = stream;
+                    video.srcObject = stream;
+                    video.play();
+                    startQRDetection(video);
+                })
+                .catch(err => {
+                    console.error('Camera error:', err);
+                    showManualInput();
+                });
+            }
+            
+            let lastScanTime = 0;
+            const SCAN_COOLDOWN = 1000; // 1 second cooldown between scans
+
+            function startQRDetection(video) {
+                const canvas = document.getElementById('qr-canvas');
+                const context = canvas.getContext('2d');
+                
+                const scanInterval = setInterval(() => {
+                    if (!isScanning || scannedCards.length >= 2) {
+                        clearInterval(scanInterval);
+                        return;
+                    }
+                    
+                    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                        canvas.height = video.videoHeight;
+                        canvas.width = video.videoWidth;
+                        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        
+                        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                        
+                        if (typeof jsQR !== 'undefined') {
+                            const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                                inversionAttempts: "dontInvert",
+                            });
+                            
+                            if (code) {
+                                // CHECK COOLDOWN - Prevent rapid successive scans
+                                const currentTime = Date.now();
+                                if (currentTime - lastScanTime < SCAN_COOLDOWN) {
+                                    return; // Skip this scan if too soon
+                                }
+                                lastScanTime = currentTime;
+                                
+                                console.log('QR Code detected:', code.data);
+                                
+                                try {
+                                    // Try JSON format first
+                                    const cardData = JSON.parse(code.data);
+                                    if (cardData.suit && cardData.value) {
+                                        handleQRDetection({
+                                            suit: cardData.suit,
+                                            value: cardData.value,
+                                            scannedAt: Date.now()
+                                        });
+                                    }
+                                } catch (e) {
+                                    // Handle CARD_SUIT_VALUE format
+                                    const parts = code.data.split('_');
+                                    if (parts.length >= 3 && parts[0] === 'CARD') {
+                                        const suit = parts[1].toLowerCase();
+                                        const value = parts[2];
+                                        
+                                        const validSuits = ['hearts', 'diamonds', 'clubs', 'spades'];
+                                        const validValues = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+                                        
+                                        if (validSuits.includes(suit) && validValues.includes(value)) {
+                                            handleQRDetection({
+                                                value: value,
+                                                suit: suit,
+                                                scannedAt: Date.now()
+                                            });
+                                        } else {
+                                            showError(`Invalid card: ${value} of ${suit}`);
+                                        }
+                                    } else {
+                                        showError('Invalid QR code format. Expected: CARD_SUIT_VALUE');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }, 300);
+            }
+            
+            function handleQRDetection(cardData) {
+                if (scannedCards.length >= 2) return;
+                
+                // Check for duplicates
+                const cardKey = `${cardData.value}_${cardData.suit}`;
+                const alreadyScanned = scannedCards.some(card => 
+                    `${card.value}_${card.suit}` === cardKey
+                );
+                
+                if (alreadyScanned) {
+                    showError(`Card ${cardData.value} of ${cardData.suit} already scanned!`);
+                    return;
+                }
+                
+                // ADD VISUAL SUCCESS FEEDBACK
+                showSuccessFlash(` Scanned: ${cardData.value} of ${cardData.suit}`);
+                
+                scannedCards.push(cardData);
+                updateScanProgress();
+                
+                socket.emit('qrCodeScanned', {
+                    sessionId: sessionId,
+                    playerId: socket.id,
+                    cardData: cardData,
+                    scanResult: 'success',
+                    playerRole: isDealer ? 'dealer' : 'player'
+                });
+                
+                if (scannedCards.length >= 2) {
+                    isScanning = false;
+                    document.getElementById('finishScanning').style.display = 'block';
+                    
+                    const cardBonus = checkCardMatchingBonus();
+                    console.log(`📱 2 cards scanned for Round ${currentRound || 1}`);
+                    
+                    showRoundScanningComplete({ 
+                        message: `Round ${currentRound || 1} scanning complete!`,
+                        bonus: cardBonus,
+                        round: currentRound || 1 //  PASS CURRENT ROUND
+                    });
+                    
+                    setTimeout(() => {
+                        finishScanning();
+                    }, 5000);
+                }
+            }
+
+            // ADD SUCCESS FLASH FUNCTION
+            function showSuccessFlash(message) {
+                const flashDiv = document.createElement('div');
+                flashDiv.style.cssText = `
+                    background: #d4edda;
+                    color: #155724;
+                    padding: 12px;
+                    border-radius: 8px;
+                    margin: 10px 0;
+                    border: 1px solid #c3e6cb;
+                    text-align: center;
+                    position: relative;
+                    z-index: 1000;
+                    animation: fadeInOut 2s ease-in-out;
+                `;
+                flashDiv.textContent = message;
+                
+                const container = document.querySelector('.qr-scanner-container');
+                if (container) {
+                    container.insertBefore(flashDiv, container.firstChild);
+                    
+                    setTimeout(() => {
+                        if (flashDiv.parentNode) {
+                            flashDiv.parentNode.removeChild(flashDiv);
+                        }
+                    }, 2000);
+                }
+            }
+
+            // ADD ERROR DISPLAY FUNCTION
+            function showError(message) {
+                const errorDiv = document.createElement('div');
+                errorDiv.style.cssText = `
+                    background: #f8d7da;
+                    color: #721c24;
+                    padding: 12px;
+                    border-radius: 8px;
+                    margin: 10px 0;
+                    border: 1px solid #f5c6cb;
+                    text-align: center;
+                    position: relative;
+                    z-index: 1000;
+                `;
+                errorDiv.textContent = message;
+                
+                const container = document.querySelector('.qr-scanner-container');
+                if (container) {
+                    container.insertBefore(errorDiv, container.firstChild);
+                    
+                    setTimeout(() => {
+                        if (errorDiv.parentNode) {
+                            errorDiv.parentNode.removeChild(errorDiv);
+                        }
+                    }, 3000);
+                }
+            }
+            
+            function updateScanProgress() {
+                document.getElementById('scannedCount').textContent = scannedCards.length;
+                
+                const cardsDiv = document.getElementById('scannedCards');
+                cardsDiv.innerHTML = `
+                    <h4>Your Scanned Cards:</h4>
+                    ${scannedCards.map(card => 
+                        `<div class="card-item">${card.value} of ${card.suit}</div>`
+                    ).join('')}
+                `;
+            }
+            
+            function finishScanning() {
+                isScanning = false;
+                if (scanStream) {
+                    scanStream.getTracks().forEach(track => track.stop());
+                }
+            }
+            
+            // Check for matching cards
+            function checkCardMatchingBonus() {
+                if (scannedCards.length !== 2) return null;
+                
+                const [card1, card2] = scannedCards;
+                const suits = [card1.suit, card2.suit];
+                const values = [card1.value, card2.value];
+                
+                console.log('🎴 Checking card bonus:', { card1, card2, suits, values });
+                
+                //  CHECK FOR BLACKJACK FIRST (A + 10/J/Q/K) = +10 BONUS
+                const hasAce = values.includes('A');
+                const hasTen = values.some(v => ['10', 'J', 'Q', 'K'].includes(v));
+                if (hasAce && hasTen) {
+                    console.log('🃏 Blackjack detected!');
+                    return {
+                        type: 'blackjack',
+                        description: 'Blackjack!',
+                        bonusMarks: 10, //  Blackjack = +10 points
+                        difficultyBonus: true
+                    };
+                }
+                
+                //  CHECK FOR 21 CARD VALUE = +10 BONUS
+                const combinedValue = calculateCombinedCardValue(scannedCards);
+                if (combinedValue === 21) {
+                    console.log('🎯 21 Card Value detected!');
+                    return {
+                        type: 'twenty_one',
+                        description: '21 Card Value!',
+                        bonusMarks: 10, //  21 value = +10 points
+                        difficultyBonus: true
+                    };
+                }
+                
+                //  CHECK FOR MATCHING VALUES (PAIRS) = +7 BONUS
+                if (values[0] === values[1]) {
+                    console.log('👥 Pair detected:', values[0]);
+                    return {
+                        type: 'value_match',
+                        description: `Pair of ${values[0]}s`,
+                        bonusMarks: 7, //  Same numbers = +7 points
+                        difficultyBonus: true
+                    };
+                }
+                
+                //  CHECK FOR MATCHING SUITS = +5 BONUS
+                if (suits[0] === suits[1]) {
+                    console.log('🎨 Same suit detected:', suits[0]);
+                    return {
+                        type: 'suit_match',
+                        description: `Both ${suits[0]}`,
+                        bonusMarks: 5, //  Same suits = +5 points
+                        difficultyBonus: true
+                    };
+                }
+                
+                console.log('❌ No bonus detected');
+                return null; // No bonus
+            }
+
+            function calculateCombinedCardValue(cards) {
+                if (!cards || cards.length !== 2) return 0;
+                
+                let totalValue = 0;
+                let aces = 0;
+                
+                cards.forEach(card => {
+                    const value = card.value;
+                    
+                    if (value === 'A') {
+                        aces++;
+                        totalValue += 11; // Start with 11, will adjust later if needed
+                    } else if (['K', 'Q', 'J'].includes(value)) {
+                        totalValue += 10; // Face cards = 10
+                    } else {
+                        const numValue = parseInt(value);
+                        if (!isNaN(numValue) && numValue >= 2 && numValue <= 10) {
+                            totalValue += numValue;
+                        }
+                    }
+                });
+                
+                // Adjust for Aces (if total > 21, convert Aces from 11 to 1)
+                while (totalValue > 21 && aces > 0) {
+                    totalValue -= 10; // Convert one Ace from 11 to 1
+                    aces--;
+                }
+                
+                return totalValue;
+            }
+
+            socket.on('playerTurnAnnouncement', (data) => {
+                console.log('👤 Player turn announced:', data);
+                
+                if (data.currentPlayer.name === playerName) {
+                    // It's this player's turn
+                    document.getElementById('gameContainer').innerHTML = `
+                        <div style="text-align: center; padding: 30px;">
+                            <h2>🎯 Your Turn!</h2>
+                            <p>Get ready to answer the question...</p>
+                            <div class="loading-spinner">⏳</div>
+                        </div>
+                    `;
+                } else {
+                    // Another player's turn
+                    document.getElementById('gameContainer').innerHTML = `
+                        <div style="text-align: center; padding: 30px;">
+                            <h3>🎮 ${data.currentPlayer.name}'s Turn</h3>
+                            <p>Wait for your turn...</p>
+                            <p>Turn ${data.turnNumber} of ${data.totalPlayers}</p>
+                        </div>
+                    `;
+                }
+            });
+
+            socket.on('questionPresented', (data) => {
+                console.log('❓ Question received:', data);
+                
+                // Show the question to all players
+                showQuestionForMobile(data.question, data.currentPlayer);
+            });
+
+            function showQuestionForMobile(question, currentPlayer) {
+                console.log('📱 Showing question for mobile:', question);
+                
+                const isMyTurn = currentPlayer.name === playerName;
+                const questionHTML = `
+                    <div style="padding: 20px;">
+                        <div style="background: ${isMyTurn ? '#e3f2fd' : '#f5f5f5'}; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: center;">
+                            <h3>${isMyTurn ? '🎯 Your Turn!' : `🎮 ${currentPlayer.name}'s Turn`}</h3>
+                            ${isMyTurn ? '<p><strong>Answer the question below:</strong></p>' : '<p>Watch and learn from this question:</p>'}
+                        </div>
+                        
+                        <div style="background: white; padding: 20px; border-radius: 10px; margin: 20px 0; border: 2px solid #007bff;">
+                            <h4 style="margin-bottom: 15px;">❓ Question:</h4>
+                            <p style="font-size: 1.1em; margin: 15px 0; font-weight: bold; line-height: 1.4;">${question.question_text}</p>
+                            
+                            <div style="margin: 20px 0;">
+                                ${['A', 'B', 'C', 'D'].map((option, index) => {
+                                    const optionKey = `option_${option.toLowerCase()}`;
+                                    const optionText = question[optionKey];
+                                    
+                                    if (!optionText) return '';
+                                    
+                                    return `
+                                        <button 
+                                            class="answer-option" 
+                                            data-option="${option}"
+                                            onclick="${isMyTurn ? `selectAnswer('${option}')` : ''}"
+                                            style="
+                                                display: block; 
+                                                width: 100%; 
+                                                padding: 15px; 
+                                                margin: 10px 0; 
+                                                border: 2px solid #ddd; 
+                                                background: ${isMyTurn ? 'white' : '#f5f5f5'}; 
+                                                border-radius: 8px; 
+                                                cursor: ${isMyTurn ? 'pointer' : 'not-allowed'};
+                                                font-size: 1em;
+                                                text-align: left;
+                                                ${isMyTurn ? '' : 'opacity: 0.6;'}
+                                                transition: all 0.2s ease;
+                                            "
+                                            ${isMyTurn ? 'onmouseover="this.style.background=\'#f8f9fa\'" onmouseout="this.style.background=\'white\'"' : ''}
+                                        >
+                                            <strong>${option}:</strong> ${optionText}
+                                        </button>
+                                    `;
+                                }).join('')}
+                            </div>
+                            
+                            ${isMyTurn ? `
+                                <div id="selectedAnswer" style="margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; display: none; text-align: center;">
+                                    <p><strong>Selected:</strong> <span id="selectedOption"></span></p>
+                                    <button class="btn btn-success" onclick="submitAnswer()" style="margin-top: 10px; padding: 12px 24px; font-size: 1.1em;">
+                                         Submit Answer
+                                    </button>
+                                </div>
+                            ` : `
+                                <div style="margin: 20px 0; padding: 15px; background: #fff3cd; border-radius: 8px; text-align: center;">
+                                    <p><strong>⏳ Waiting for ${currentPlayer.name} to answer...</strong></p>
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('gameContainer').innerHTML = questionHTML;
+                
+                // Start timer if it's the player's turn
+                if (isMyTurn) {
+                    startQuestionTimer(60); // 60 seconds
+                }
+            }
+
+            function selectAnswer(option) {
+                console.log(`📱 Selected answer: ${option}`);
+                
+                // Remove previous selection
+                document.querySelectorAll('.answer-option').forEach(btn => {
+                    btn.style.background = 'white';
+                    btn.style.borderColor = '#ddd';
+                });
+                
+                // Highlight selected option
+                const selectedBtn = document.querySelector(`[data-option="${option}"]`);
+                selectedBtn.style.background = '#e3f2fd';
+                selectedBtn.style.borderColor = '#007bff';
+                
+                // Store selection
+                selectedAnswerOption = option;
+                
+                // Show submit area
+                const selectedDiv = document.getElementById('selectedAnswer');
+                const selectedSpan = document.getElementById('selectedOption');
+                const optionText = selectedBtn.textContent.split(': ')[1];
+                selectedSpan.textContent = `${option}: ${optionText}`;
+                selectedDiv.style.display = 'block';
+                
+                // Scroll to submit button
+                selectedDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+
+            // Add answer submission function
+            function submitAnswer() {
+                if (!selectedAnswerOption) {
+                    alert('Please select an answer first!');
+                    return;
+                }
+                
+                console.log(`📤 Submitting answer: ${selectedAnswerOption}`);
+                
+                socket.emit('answerSubmitted', {
+                    sessionId: sessionId,
+                    playerId: socket.id,
+                    playerName: playerName,
+                    answer: selectedAnswerOption,
+                    submittedAt: Date.now()
+                });
+                
+                // Show waiting state
+                document.getElementById('gameContainer').innerHTML = `
+                    <div style="text-align: center; padding: 30px;">
+                        <h3> Answer Submitted!</h3>
+                        <div style="background: #d4edda; color: #155724; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <p><strong>Your answer:</strong> ${selectedAnswerOption}</p>
+                        </div>
+                        <p>⏳ Waiting for results...</p>
+                    </div>
+                `;
+                
+                // Clear selection for next question
+                selectedAnswerOption = null;
+            }
+
+            // Add answer result handler
+            socket.on('answerResult', (data) => {
+                console.log('📊 Answer result received:', data);
+                
+                const isCorrect = data.isCorrect;
+                const correctAnswer = data.correctAnswer;
+                const playerAnswer = data.playerAnswer;
+                
+                //  SHOW ANSWER RESULT FOR LONGER DURATION
+                document.getElementById('gameContainer').innerHTML = `
+                    <div style="text-align: center; padding: 30px;">
+                        <div style="background: ${isCorrect ? '#d4edda' : '#f8d7da'}; color: ${isCorrect ? '#155724' : '#721c24'}; padding: 25px; border-radius: 15px; margin: 20px 0; border: 3px solid ${isCorrect ? '#c3e6cb' : '#f5c6cb'};">
+                            <h3 style="font-size: 1.5em; margin-bottom: 15px;">${isCorrect ? ' Correct!' : '❌ Incorrect'}</h3>
+                            <div style="background: rgba(255,255,255,0.2); padding: 15px; border-radius: 8px; margin: 15px 0;">
+                                <p style="margin: 8px 0; font-size: 1.1em;"><strong>Your answer:</strong> ${playerAnswer}</p>
+                                <p style="margin: 8px 0; font-size: 1.1em;"><strong>Correct answer:</strong> ${correctAnswer}</p>
+                            </div>
+                            ${data.bonusPoints ? `<p style="color: #ffc107; font-weight: bold; font-size: 1.1em;">🎉 Bonus: +${data.bonusPoints} points</p>` : ''}
+                            ${data.scoreGained ? `<p style="font-weight: bold; font-size: 1.2em;">📊 Points earned: +${data.scoreGained}</p>` : ''}
+                            ${data.newTotalScore !== undefined ? `<p style="font-weight: bold; font-size: 1.3em; margin-top: 15px;">🎯 Total Score: ${data.newTotalScore}</p>` : ''}
+                        </div>
+                        
+                        <div style="background: #e7f3ff; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                            <p>⏳ <strong>Please wait...</strong></p>
+                            <p style="font-size: 0.9em;">Result showing for 4 seconds...</p>
+                        </div>
+                    </div>
+                `;
+                
+                //  AUTO-CLEAR ANSWER RESULT AFTER 4.5 SECONDS (slightly longer than server delay)
+                setTimeout(() => {
+                    document.getElementById('gameContainer').innerHTML = `
+                        <div style="text-align: center; padding: 30px;">
+                            <h3>⏳ Waiting for next phase...</h3>
+                            <div style="background: #f8f9fa; color: #6c757d; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                <p>Preparing next question or round...</p>
+                            </div>
+                        </div>
+                    `;
+                }, 4500);
+            });
+
+            // Add next turn handler
+            socket.on('nextPlayerTurn', (data) => {
+                console.log('🔄 Next player turn:', data);
+                // This will trigger playerTurnAnnouncement which you already have
+            });
+
+            // Add game completion handler
+            socket.on('gameComplete', (data) => {
+                console.log('🏁 Game completed:', data);
+                
+                // Remove any timers
+                const existingTimer = document.getElementById('questionTimer');
+                if (existingTimer) {
+                    existingTimer.remove();
+                }
+                
+                const { finalScores, playerScore, playerRank } = data;
+                
+                //  SIMPLE CLEAN FORMAT AS REQUESTED
+                const rankingsHTML = finalScores.map((player, index) => {
+                    const isMe = player.name === playerName;
+                    return `${index + 1}. ${player.name} (${player.role}): ${player.totalScore} points${isMe ? ' 👈 YOU' : ''}`;
+                }).join('\n\n');
+                
+                document.getElementById('gameContainer').innerHTML = `
+                    <div style="text-align: center; padding: 30px; font-family: monospace; line-height: 1.6;">
+                        <div style="background: #f8f9fa; color: #333; padding: 30px; border-radius: 15px; border: 2px solid #dee2e6; white-space: pre-line; font-size: 16px;">
+            🏁 Game Complete!
+
+            🏆 Final Rankings:
+
+            ${rankingsHTML}
+
+            Thank you for playing BlackJackie!
+                        </div>
+                        
+                        <button 
+                            onclick="endGame()" 
+                            style="
+                                background: #dc3545;
+                                color: white;
+                                border: none;
+                                padding: 15px 30px;
+                                border-radius: 10px;
+                                font-size: 18px;
+                                font-weight: bold;
+                                cursor: pointer;
+                                margin-top: 30px;
+                                box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);
+                                transition: all 0.3s ease;
+                            "
+                            onmouseover="this.style.background='#c82333'; this.style.transform='translateY(-2px)'"
+                            onmouseout="this.style.background='#dc3545'; this.style.transform='translateY(0px)'"
+                        >
+                            [ End Game ]
+                        </button>
+                    </div>
+                `;
+            });
+
+            function endGame() {
+                console.log('🔚 End Game button clicked');
+                
+                // Show confirmation
+                if (confirm('Are you sure you want to end the game and return to the lobby?')) {
+                    // Emit disconnect or redirect
+                    socket.emit('playerLeaveGame', {
+                        sessionId: sessionId,
+                        playerName: playerName
+                    });
+                    
+                    // Redirect to lobby or home page
+                    window.location.href = '/Mobile_Result?username=' + encodeURIComponent(username);
+                }
+            }
+            
+            function showManualInput() {
+                document.getElementById('gameContainer').innerHTML = `
+                    <div style="text-align: center; padding: 30px;">
+                        <h2>⌨️ Manual Card Input</h2>
+                        <p>Enter your cards manually:</p>
+                        
+                        <div style="margin: 20px;">
+                            <h4>Card 1:</h4>
+                            <select id="card1Value">
+                                <option value="">Value...</option>
+                                <option value="A">Ace</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                                <option value="J">Jack</option>
+                                <option value="Q">Queen</option>
+                                <option value="K">King</option>
+                            </select>
+                            <select id="card1Suit">
+                                <option value="">Suit...</option>
+                                <option value="hearts">Hearts</option>
+                                <option value="diamonds">Diamonds</option>
+                                <option value="clubs">Clubs</option>
+                                <option value="spades">Spades</option>
+                            </select>
+                        </div>
+                        
+                        <div style="margin: 20px;">
+                            <h4>Card 2:</h4>
+                            <select id="card2Value">
+                                <option value="">Value...</option>
+                                <option value="A">Ace</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                                <option value="J">Jack</option>
+                                <option value="Q">Queen</option>
+                                <option value="K">King</option>
+                            </select>
+                            <select id="card2Suit">
+                                <option value="">Suit...</option>
+                                <option value="hearts">Hearts</option>
+                                <option value="diamonds">Diamonds</option>
+                                <option value="clubs">Clubs</option>
+                                <option value="spades">Spades</option>
+                            </select>
+                        </div>
+                        
+                        <button class="btn btn-success" onclick="submitManualCards()">Submit Cards</button>
+                    </div>
+                `;
+            }
+            
+            function submitManualCards() {
+                const card1Value = document.getElementById('card1Value').value;
+                const card1Suit = document.getElementById('card1Suit').value;
+                const card2Value = document.getElementById('card2Value').value;
+                const card2Suit = document.getElementById('card2Suit').value;
+                
+                if (!card1Value || !card1Suit || !card2Value || !card2Suit) {
+                    alert('Please select both cards completely');
+                    return;
+                }
+                
+                scannedCards = [
+                    { value: card1Value, suit: card1Suit, scannedAt: Date.now() },
+                    { value: card2Value, suit: card2Suit, scannedAt: Date.now() }
+                ];
+                
+                scannedCards.forEach(cardData => {
+                    socket.emit('qrCodeScanned', {
+                        sessionId: sessionId,
+                        playerId: socket.id,
+                        cardData: cardData,
+                        scanResult: 'manual_input',
+                        playerRole: isDealer ? 'dealer' : 'player'
+                    });
+                });
+            }
+
+            socket.on('answerReceived', (data) => {
+                console.log('📩 Answer received notification:', data);
+                hideMobileAnswerTimer();
+                
+                const { playerName, answerSubmitted, waitingForNext } = data;
+                
+                // Show notification that answer was submitted
+                if (waitingForNext) {
+                    document.getElementById('gameContainer').innerHTML = `
+                        <div style="text-align: center; padding: 30px;">
+                            <h3> ${playerName} submitted their answer</h3>
+                            <div style="background: #d1ecf1; color: #0c5460; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                <p>⏳ Waiting for next question...</p>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            // Round complete handler
+            socket.on('roundComplete', (data) => {
+                console.log('🏁 Round completed:', data);
+                
+                //  CLEAR ALL TIMERS AND RESET STATE
+                if (window.mobileTimerInterval) {
+                    clearInterval(window.mobileTimerInterval);
+                    window.mobileTimerInterval = null;
+                }
+                
+                // Remove any existing timers
+                const existingTimer = document.getElementById('mobileAnswerTimer');
+                if (existingTimer) {
+                    existingTimer.remove();
+                }
+                
+                // Reset answer selection
+                selectedAnswerOption = null;
+                
+                const { completedRound, nextRound, scores } = data;
+                const myScore = scores.find(s => s.name === playerName)?.score || 0;
+                
+                //  SHOW EXTENDED ROUND SUMMARY
+                const roundSummaryHTML = `
+                    <div style="text-align: center; padding: 30px;">
+                        <h2>🏁 Round ${completedRound} Complete!</h2>
+                        
+                        <div style="background: #d4edda; color: #155724; padding: 25px; border-radius: 15px; margin: 25px 0;">
+                            <h3>📊 Your Performance:</h3>
+                            <div style="font-size: 1.4em; font-weight: bold; margin: 15px 0;">
+                                ${myScore} Points
+                            </div>
+                            <div style="font-size: 0.9em;">
+                                ${isDealer ? '👑 Dealer' : '🎮 Player'} • Round ${completedRound} of 5
+                            </div>
+                        </div>
+                        
+                        <div style="background: #f8f9fa; color: #495057; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <h4>📊 All Scores:</h4>
+                            ${scores.sort((a, b) => (b.score || 0) - (a.score || 0)).map((player, index) => `
+                                <div style="display: flex; justify-content: space-between; padding: 8px; margin: 5px 0; background: ${player.name === playerName ? '#fff3cd' : 'white'}; border-radius: 5px;">
+                                    <span>${index + 1}. ${player.name} ${player.role === 'Dealer' ? '👑' : '🎮'}</span>
+                                    <span><strong>${player.score || 0} pts</strong></span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        <div style="background: #e7f3ff; color: #0c5460; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <h4>⏳ What's Next?</h4>
+                            ${nextRound <= 5 ? 
+                                `<p><strong>Round ${nextRound}</strong> will start soon!</p>
+                                <p>You'll receive new cards to scan</p>
+                                <p><em>Please wait approximately 20 seconds...</em></p>` :
+                                `<p>🏆 <strong>All rounds complete!</strong></p>
+                                <p>Final results coming soon...</p>`
+                            }
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('gameContainer').innerHTML = roundSummaryHTML;
+            });
+
+            // Next round starting handler
+            socket.on('nextRoundStarting', (data) => {
+                console.log('🎯 Next round starting:', data);
+                
+                const { round } = data;
+                
+                document.getElementById('gameContainer').innerHTML = `
+                    <div style="text-align: center; padding: 30px;">
+                        <h2>🎯 Round ${round} Starting!</h2>
+                        <div style="background: #d1ecf1; color: #0c5460; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <p>Get ready for the next set of questions!</p>
+                        </div>
+                    </div>
+                `;
+            });
+
+            // Handler for new round card scanning
+            socket.on('newRoundCardScanning', (data) => {
+                console.log('🃏 New round card scanning:', data);
+                
+                const { round, totalRounds, message, instructions, scanDuration, currentScores } = data;
+                
+                // Update round tracking
+                currentRound = round;
+                gameCurrentRound = round;
+
+                // Reset for new round
+                scannedCards = [];
+                isScanning = false;
+                selectedAnswerOption = null;
+                
+                document.getElementById('gameContainer').innerHTML = `
+                    <div style="text-align: center; padding: 30px;">
+                        <h2>🃏 Round ${round} - NEW CARDS!</h2>
+                        <div style="background: #fff3cd; color: #856404; padding: 20px; border-radius: 10px; margin: 20px 0; border: 2px solid #ffc107;">
+                            <h3>${message}</h3>
+                            <p><strong>Instructions:</strong> ${instructions}</p>
+                            <p><strong>⏰ Scanning Time:</strong> ${scanDuration} seconds</p>
+                        </div>
+                        
+                        <div style="background: #e7f3ff; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                            <h4>Scores After Round ${round - 1}:</h4>
+                            ${currentScores.map(player => 
+                                `<p><strong>${player.name} (${player.role}):</strong> ${player.score} points</p>`
+                            ).join('')}
+                        </div>
+                        
+                        <div style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                            <p><strong>⚠️ Important:</strong> You need to scan NEW cards for this round!</p>
+                            <p>Wait for the dealer to distribute new cards to you.</p>
+                        </div>
+                        
+                        <button class="btn btn-primary" onclick="startNewRoundScanning(${round})" 
+                                style="background: #007bff; color: white; padding: 15px 30px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; margin-top: 20px;">
+                            📱 Ready to Scan New Cards
+                        </button>
+                    </div>
+                `;
+            });
+
+            // Function to start new round scanning
+            function startNewRoundScanning(round) {
+                console.log(`📱 Starting card scanning for Round ${round}`);
+                
+                // Reset scanning state
+                isScanning = true;    
+                scannedCards = [];
+                
+                const roleClass = isDealer ? 'dealer-mode' : 'player-mode';
+                const roleInstruction = isDealer ? 
+                    'As dealer, scan your 2 NEW cards for this round' : 
+                    'Scan the 2 NEW cards given to you for this round';
+                
+                document.getElementById('gameContainer').innerHTML = `
+                    <div class="qr-scanner-container ${roleClass}">
+                        <div style="text-align: center; margin-bottom: 20px;">
+                            <h2>📱 Round ${round} - Scan Cards</h2>
+                            <p><strong>Role:</strong> ${isDealer ? '👑 Dealer' : '🎮 Player'}</p>
+                            <p>${roleInstruction}</p>
+                            <p>Cards scanned: <span id="scannedCount">0</span>/2</p>
+                            
+                            <div style="background: #d1ecf1; color: #0c5460; padding: 15px; border-radius: 8px; margin: 15px auto; max-width: 300px;">
+                                <p><strong>Round ${round} Cards:</strong> These are NEW cards for this round only!</p>
+                            </div>
+                        </div>
+                        
+                        <div class="camera-area">
+                            <video id="qr-video" autoplay playsinline muted></video>
+                            <canvas id="qr-canvas"></canvas>
+                            <div class="scan-box"></div>
+                            <p>Point camera at QR code</p>
+                        </div>
+                        
+                        <div id="scannedCards" style="margin: 20px 0; text-align: center;">
+                            <h4>Round ${round} Scanned Cards:</h4>
+                        </div>
+                        
+                        <div style="text-align: center; margin-top: 20px;">
+                            <button class="btn btn-primary" onclick="startCamera()">📷 Start Camera</button>
+                            <button class="btn btn-success" id="finishScanning" style="display:none;" onclick="finishRoundScanning(${round})">
+                                 Round ${round} Cards Complete
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Function to finish round scanning
+            function finishRoundScanning(round) {
+                console.log(` Finishing card scanning for Round ${round}`);
+                
+                isScanning = false;
+                if (scanStream) {
+                    scanStream.getTracks().forEach(track => track.stop());
+                }
+                
+                // Check for card matching bonus
+                const cardBonus = checkCardMatchingBonus();
+                
+                // 🔥 CRITICAL: Notify server that this player finished scanning
+                console.log(`📡 Emitting playerCardsComplete for Round ${round}`);
+                console.log(`📊 Sending data:`, {
+                    sessionId: sessionId,
+                    playerName: playerName,
+                    username: username,
+                    round: round,
+                    cardBonus: cardBonus
+                });
+                
+                socket.emit('playerCardsComplete', {
+                    sessionId: sessionId,
+                    playerName: playerName,
+                    username: username,
+                    round: round,
+                    cardBonus: cardBonus
+                });
+                
+                // Show completion message
+                showRoundScanningComplete({
+                    round: round,
+                    cardBonus: cardBonus
+                });
+            }
+
+            // Handler for card comparison result (after each round)
+            socket.on('cardComparisonResult', (data) => {
+                console.log('🎯 Card comparison result:', data);
+                
+                const { roundCompleted, yourCardValue, dealerCardValue, beatsDealer, bonusEarned, newTotalScore, message } = data;
+                
+                document.getElementById('gameContainer').innerHTML = `
+                    <div style="text-align: center; padding: 30px;">
+                        <h2>🎯 Round ${roundCompleted} Results</h2>
+                        
+                        <div style="background: ${beatsDealer ? '#d4edda' : '#f8d7da'}; color: ${beatsDealer ? '#155724' : '#721c24'}; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <h3>${beatsDealer ? '🎉 You Beat the Dealer!' : '😔 Dealer Wins This Round'}</h3>
+                            <p>${message}</p>
+                        </div>
+                        
+                        <div style="background: #f8f9fa; color: #495057; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <h4>Round ${roundCompleted} Card Comparison:</h4>
+                            <p><strong>Your Cards:</strong> ${yourCardValue}</p>
+                            <p><strong>Dealer Cards:</strong> ${dealerCardValue}</p>
+                            <p><strong>Bonus Earned:</strong> +${bonusEarned} points</p>
+                            <p><strong>New Total Score:</strong> ${newTotalScore} points</p>
+                        </div>
+                        
+                        <div style="background: #d1ecf1; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                            <p>⏳ ${roundCompleted < 5 ? 'Next round starting soon...' : 'Game finishing...'}</p>
+                        </div>
+                    </div>
+                `;
+            });
+
+            // Function to show round scanning complete
+            function showRoundScanningComplete(data) {                
+                const { message, bonus, round, totalRounds } = data;
+                
+                //  FIX: Don't show "Complete" - show "Ready"
+                const currentRound = round || gameCurrentRound || 1;
+                const totalRoundsText = totalRounds || 5;
+                
+                //  ENHANCED BONUS MESSAGE WITH PROPER VALUES
+                const bonusMessage = bonus ? 
+                    `<div style="background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 15px 0; border: 2px solid #ffc107;">
+                        <h4>🎉 ROUND ${currentRound} CARD BONUS!</h4>
+                        <div style="background: rgba(255,255,255,0.3); padding: 12px; border-radius: 6px; margin: 10px 0;">
+                            <p style="font-size: 1.1em; font-weight: bold; margin: 8px 0;">
+                                ${getBonusIcon(bonus.type)} ${bonus.description}
+                            </p>
+                            <p style="font-size: 1.2em; font-weight: bold; color: #d63384; margin: 8px 0;">
+                                 +${bonus.bonusMarks} bonus points for correct answers!
+                            </p>
+                            <p style="font-size: 0.9em; margin: 8px 0;">
+                                ${getBonusExplanation(bonus.type, bonus.bonusMarks)}
+                            </p>
+                        </div>
+                        <p style="font-size: 0.9em; color: #6f4f28;">✨ Questions will be EASIER this round!</p>
+                    </div>` : 
+                    `<div style="background: #f8f9fa; color: #6c757d; padding: 15px; border-radius: 8px; margin: 15px 0; border: 2px solid #dee2e6;">
+                        <h4>🎴 Round ${currentRound} Cards</h4>
+                        <p>No matching bonus this round</p>
+                        <p style="font-size: 0.9em;">You'll get the standard 10 points for correct answers</p>
+                    </div>`;
+                
+                document.getElementById('gameContainer').innerHTML = `
+                    <div style="text-align: center; padding: 30px;">
+                        <h2> Round ${currentRound} Cards Scanned!</h2>
+                        <p>${message || `Round ${currentRound} cards ready!`}</p>
+                        <p><strong>Role:</strong> ${isDealer ? '👑 Dealer' : '🎮 Player'}</p>
+                        
+                        ${bonusMessage}
+                        
+                        <div style="background: #d1ecf1; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                            <p>🎯 <strong>Waiting for all players to finish scanning...</strong></p>
+                            <p>Questions will start when everyone is ready!</p>
+                        </div>
+                    </div>
+                `;
+            }
+
+            function getBonusIcon(bonusType) {
+                const icons = {
+                    'blackjack': '🃏',
+                    'twenty_one': '🎯',
+                    'value_match': '👥',
+                    'suit_match': '🎨',
+                    'same_value': '👥',  // legacy support
+                    'same_suit': '🎨'    // legacy support
+                };
+                return icons[bonusType] || '🎴';
+            }
+
+            function getBonusExplanation(bonusType, bonusMarks) {
+                const explanations = {
+                    'blackjack': `Ace + Face card = ${bonusMarks} bonus points!`,
+                    'twenty_one': `Your cards total 21 = ${bonusMarks} bonus points!`,
+                    'value_match': `Two same numbers = ${bonusMarks} bonus points!`,
+                    'suit_match': `Two same suits = ${bonusMarks} bonus points!`,
+                    'same_value': `Two same numbers = ${bonusMarks} bonus points!`,  // legacy
+                    'same_suit': `Two same suits = ${bonusMarks} bonus points!`     // legacy
+                };
+                return explanations[bonusType] || `Bonus = ${bonusMarks} points!`;
+            }
+
+            // Update existing nextRoundStarting handler to handle card scanning
+            socket.on('nextRoundStarting', (data) => {
+                console.log('🎯 Next round starting:', data);
+                
+                const { round, totalRounds, message, currentScores } = data;
+                
+                document.getElementById('gameContainer').innerHTML = `
+                    <div style="text-align: center; padding: 30px;">
+                        <h2>🎯 Round ${round} Starting!</h2>
+                        <div style="background: #d1ecf1; color: #0c5460; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <h3>${message}</h3>
+                            <p>Round ${round} of ${totalRounds}</p>
+                        </div>
+                        
+                        <div style="background: #f8f9fa; color: #495057; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                            <h4>Current Scores:</h4>
+                            ${currentScores.map(player => 
+                                `<p><strong>${player.name} (${player.role}):</strong> ${player.score} points</p>`
+                            ).join('')}
+                        </div>
+                        
+                        <div style="background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                            <p><strong>⚠️ New cards will be distributed for this round!</strong></p>
+                            <p>Wait for the card scanning phase to begin...</p>
+                        </div>
+                    </div>
+                `;
+            });
+
+            // Update existing roundComplete handler to show card comparison
+            socket.on('roundComplete', (data) => {
+                console.log('🏁 Round completed:', data);
+                
+                const { completedRound, nextRound, dealerCardValue, cardComparisonResults, scores } = data;
+                
+                // Find my result
+                const myResult = cardComparisonResults.find(r => r.playerName === playerName);
+                
+                const roundSummaryHTML = `
+                    <div style="text-align: center; padding: 30px;">
+                        <h2>🏁 Round ${completedRound} Complete!</h2>
+                        
+                        ${myResult ? `
+                            <div style="background: ${myResult.beatsDealer ? '#d4edda' : '#f8d7da'}; color: ${myResult.beatsDealer ? '#155724' : '#721c24'}; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                <h3>Your Round ${completedRound} Result:</h3>
+                                <p><strong>Your Cards:</strong> ${myResult.playerCardValue}</p>
+                                <p><strong>Dealer Cards:</strong> ${myResult.dealerCardValue}</p>
+                                <p><strong>${myResult.beatsDealer ? '🎉 You beat the dealer!' : '😔 Dealer wins this round'}</strong></p>
+                                <p><strong>Bonus:</strong> +${myResult.bonusAwarded} points</p>
+                            </div>
+                        ` : ''}
+                        
+                        <div style="background: #f8f9fa; color: #495057; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <h3>Updated Scores:</h3>
+                            ${scores.map(player => `
+                                <p><strong>${player.name} (${player.role}):</strong> ${player.totalScore} points 
+                                ${player.name === playerName ? '👈 YOU' : ''}</p>
+                            `).join('')}
+                        </div>
+                        
+                        <div style="background: #d1ecf1; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                            <p>⏳ ${nextRound <= 5 ? `Round ${nextRound} starting soon...` : 'Game finishing...'}</p>
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('gameContainer').innerHTML = roundSummaryHTML;
+            });    
+
+            socket.on('answerTimerStart', (data) => {
+                console.log('⏱️ Answer timer started:', data);
+                
+                const { currentPlayer, timeLimit, isCurrentPlayer, gameProgress } = data;
+                
+                // Show floating timer for all players
+                showMobileAnswerTimer(currentPlayer, timeLimit, isCurrentPlayer);
+            });
+
+            function showMobileAnswerTimer(currentPlayer, timeLimit, isCurrentPlayer) {
+                // Remove any existing timer
+                const existingTimer = document.getElementById('mobileAnswerTimer');
+                if (existingTimer) {
+                    existingTimer.remove();
+                }
+
+                //  RESET SELECTED ANSWER FOR NEW QUESTION
+                if (isCurrentPlayer) {
+                    selectedAnswerOption = null;
+                    console.log('🔄 Reset selectedAnswerOption for new question');
+                }
+                
+                // Clear any existing intervals
+                if (window.mobileTimerInterval) {
+                    clearInterval(window.mobileTimerInterval);
+                    window.mobileTimerInterval = null;
+                }
+                
+                // Create floating timer element
+                const timerElement = document.createElement('div');
+                timerElement.id = 'mobileAnswerTimer';
+                timerElement.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: ${isCurrentPlayer ? 'linear-gradient(135deg, #dc3545, #c82333)' : 'linear-gradient(135deg, #007bff, #0056b3)'};
+                    color: white;
+                    padding: 12px 24px;
+                    border-radius: 25px;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                    z-index: 1000;
+                    font-weight: bold;
+                    text-align: center;
+                    min-width: 200px;
+                    backdrop-filter: blur(10px);
+                    border: 2px solid rgba(255, 255, 255, 0.3);
+                    animation: slideDown 0.5s ease-out;
+                `;
+                
+                timerElement.innerHTML = `
+                    <div style="font-size: 0.9em; margin-bottom: 4px;">
+                        ${isCurrentPlayer ? '🎯 Your Turn!' : `⏳ ${currentPlayer.name}'s Turn`}
+                    </div>
+                    <div style="font-size: 1.2em; font-weight: bold;">
+                        <span id="mobileTimerValue">${timeLimit}</span>s
+                    </div>
+                    <div style="width: 100%; height: 4px; background: rgba(255, 255, 255, 0.3); border-radius: 2px; margin-top: 6px; overflow: hidden;">
+                        <div id="mobileTimerBar" style="height: 100%; background: rgba(255, 255, 255, 0.8); width: 100%; transition: width 0.1s linear;"></div>
+                    </div>
+                `;
+                
+                document.body.appendChild(timerElement);
+                
+                // Start countdown
+                startMobileTimer(timeLimit, isCurrentPlayer);
+            }
+
+            function startMobileTimer(timeLimit, isCurrentPlayer) {
+                let timeRemaining = timeLimit;
+                const timerValue = document.getElementById('mobileTimerValue');
+                const timerBar = document.getElementById('mobileTimerBar');
+                const timerElement = document.getElementById('mobileAnswerTimer');
+                
+                if (!timerValue || !timerBar || !timerElement) return;
+                
+                // Clear any existing mobile timer
+                if (window.mobileTimerInterval) {
+                    clearInterval(window.mobileTimerInterval);
+                }
+                
+                window.mobileTimerInterval = setInterval(() => {
+                    timeRemaining--;
+                    
+                    // Update display
+                    timerValue.textContent = timeRemaining;
+                    const percentage = (timeRemaining / timeLimit) * 100;
+                    timerBar.style.width = `${percentage}%`;
+                    
+                    // Change colors based on time remaining
+                    if (timeRemaining <= 10) {
+                        timerElement.style.background = 'linear-gradient(135deg, #dc3545, #c82333)';
+                        if (isCurrentPlayer) {
+                            timerElement.style.animation = 'pulse 0.5s infinite';
+                        }
+                    }
+                    
+                    //  AUTO-SUBMIT WHEN TIME RUNS OUT
+                    if (timeRemaining <= 0) {
+                        clearInterval(window.mobileTimerInterval);
+                        timerValue.textContent = '0';
+                        timerBar.style.width = '0%';
+                        
+                        //  ONLY AUTO-SUBMIT IF IT'S THE CURRENT PLAYER'S TURN
+                        if (isCurrentPlayer) {
+                            console.log('⏰ Time\'s up! Auto-submitting...');
+                            
+                            // Show timeout message
+                            document.getElementById('gameContainer').innerHTML = `
+                                <div style="text-align: center; padding: 30px;">
+                                    <h3>⏰ Time's Up!</h3>
+                                    <div style="background: #f8d7da; color: #721c24; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                        <p><strong>Time expired!</strong></p>
+                                        <p>Auto-submitting: ${selectedAnswerOption ? `Answer ${selectedAnswerOption}` : 'No answer (Timeout)'}</p>
+                                    </div>
+                                    <p>⏳ Waiting for next question...</p>
+                                </div>
+                            `;
+                            
+                            //  EMIT APPROPRIATE EVENT BASED ON WHETHER ANSWER WAS SELECTED
+                            if (selectedAnswerOption) {
+                                // Submit the selected answer
+                                socket.emit('answerSubmitted', {
+                                    sessionId: sessionId,
+                                    playerId: socket.id,
+                                    playerName: playerName,
+                                    answer: selectedAnswerOption,
+                                    submittedAt: Date.now(),
+                                    autoSubmitted: true
+                                });
+                            } else {
+                                // Submit timeout
+                                socket.emit('answerTimeout', {
+                                    sessionId: sessionId,
+                                    playerId: socket.id,
+                                    playerName: playerName,
+                                    submittedAt: Date.now()
+                                });
+                            }
+                            
+                            // Reset for next question
+                            selectedAnswerOption = null;
+                        }
+                        
+                        // Auto-hide timer
+                        setTimeout(() => {
+                            hideMobileAnswerTimer();
+                        }, 3000);
+                    }
+                }, 1000);
+            }
+
+            function hideMobileAnswerTimer() {
+                const timerElement = document.getElementById('mobileAnswerTimer');
+                if (timerElement) {
+                    timerElement.style.animation = 'slideUp 0.5s ease-in';
+                    setTimeout(() => {
+                        if (timerElement.parentNode) {
+                            timerElement.parentNode.removeChild(timerElement);
+                        }
+                    }, 500);
+                }
+                
+                // Clear timer interval
+                if (window.mobileTimerInterval) {
+                    clearInterval(window.mobileTimerInterval);
+                    window.mobileTimerInterval = null;
+                }
+            }
+
+            //  HANDLE PLAYER ANSWERED - HIDE TIMER
+            socket.on('playerAnswered', (data) => {
+                console.log('📊 Player answered - hiding timer:', data);
+                hideMobileAnswerTimer();
+            });
+
+            socket.on('answerTimerStop', (data) => {
+                console.log('⏰ Answer timer stopped:', data);
+                
+                // Clear any existing timer
+                if (window.mobileTimerInterval) {
+                    clearInterval(window.mobileTimerInterval);
+                    window.mobileTimerInterval = null;
+                }
+                
+                // Remove timer display
+                hideMobileAnswerTimer();
+                
+                //  ONLY SHOW FEEDBACK IF NO answerResult IS COMING
+                // (answerResult handler will show the proper detailed feedback)
+                if (data.answerReceived && data.playerName && !data.isCorrect && data.answer === 'Timeout') {
+                    // Only show quick feedback for timeouts that won't get answerResult
+                    const feedbackElement = document.createElement('div');
+                    feedbackElement.style.cssText = `
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        background: #f8d7da;
+                        color: #721c24;
+                        padding: 20px 30px;
+                        border-radius: 10px;
+                        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+                        z-index: 10000;
+                        font-size: 16px;
+                        font-weight: bold;
+                        text-align: center;
+                        border: 2px solid #f5c6cb;
+                    `;
+                    
+                    feedbackElement.innerHTML = `
+                        <div style="margin-bottom: 10px;">
+                            ${data.playerName} timed out
+                        </div>
+                        <div style="font-size: 1.2em; margin: 10px 0;">
+                            ⏰ Time's Up!
+                        </div>
+                        <div style="font-size: 0.9em;">Correct answer: ${data.correctAnswer}</div>
+                    `;
+                    
+                    document.body.appendChild(feedbackElement);
+                    
+                    // Remove feedback after 3 seconds
+                    setTimeout(() => {
+                        if (feedbackElement.parentNode) {
+                            feedbackElement.parentNode.removeChild(feedbackElement);
+                        }
+                    }, 3000);
+                }
+            });
+
+            //  ADD THIS TO YOUR MOBILE CODE (Gameplay_Mobile.pug):
+            socket.on('roundTransition', (data) => {
+                const { completedRound, nextRound, message, scores } = data;
+                
+                console.log(`🔄 Round transition: ${completedRound} → ${nextRound}`);
+                
+                document.getElementById('gameContainer').innerHTML = `
+                    <div style="text-align: center; padding: 30px;">
+                        <h2>🏁 Round ${completedRound} Complete!</h2>
+                        <div style="background: #d4edda; color: #155724; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <p>${message}</p>
+                            <p><strong>Your Score:</strong> ${scores.find(s => s.name === playerName)?.score || 0} points</p>
+                        </div>
+                        <div style="background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                            <h4>🎯 Round ${nextRound} Starting Soon!</h4>
+                            <p>Get ready for new cards and questions...</p>
+                        </div>
+                        <div class="loading-dots">
+                            <span>.</span><span>.</span><span>.</span>
+                        </div>
+                    </div>
+                `;
+            });
+
+            socket.on('playerAnsweredBroadcast', (data) => {
+                console.log('📢 Player answered broadcast received:', data);
+                
+                const { playerName: answeringPlayer, answer, isCorrect, correctAnswer, scoreGained, newScore, timedOut } = data;
+                
+                //  ONLY SHOW IF IT'S NOT THE CURRENT PLAYER'S OWN ANSWER
+                if (answeringPlayer !== playerName) {
+                    // Show result notification for other players
+                    showAnswerNotification({
+                        playerName: answeringPlayer,
+                        answer: answer,
+                        isCorrect: isCorrect,
+                        correctAnswer: correctAnswer,
+                        scoreGained: scoreGained,
+                        newScore: newScore,
+                        timedOut: timedOut
+                    });
+                }
+            });
+
+            //  ADD THIS FUNCTION to show answer notifications:
+            function showAnswerNotification(data) {
+                const { playerName: answeringPlayer, answer, isCorrect, correctAnswer, scoreGained, newScore, timedOut } = data;
+                
+                // Update main container with answer result
+                document.getElementById('gameContainer').innerHTML = `
+                    <div style="text-align: center; padding: 30px;">
+                        <h3>📊 ${answeringPlayer} ${timedOut ? 'Timed Out' : 'Answered'}</h3>
+                        
+                        <div style="background: ${isCorrect ? '#d4edda' : '#f8d7da'}; color: ${isCorrect ? '#155724' : '#721c24'}; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <h4>${isCorrect ? ' Correct!' : '❌ Incorrect'}</h4>
+                            <div style="margin: 10px 0;">
+                                <p><strong>Answer:</strong> ${timedOut ? 'No answer (timeout)' : answer}</p>
+                                <p><strong>Correct Answer:</strong> ${correctAnswer}</p>
+                            </div>
+                            <div style="font-weight: bold; margin-top: 15px;">
+                                ${isCorrect ? `🎯 +${scoreGained} points` : '💔 No points earned'}
+                            </div>
+                            <div style="margin-top: 10px; font-size: 0.9em;">
+                                ${answeringPlayer}'s new score: ${newScore}
+                            </div>
+                        </div>
+                        
+                        <div style="background: #e7f3ff; color: #0c5460; padding: 15px; border-radius: 8px;">
+                            <p>⏳ Waiting for next question...</p>
+                        </div>
+                    </div>
+                `;
+                
+                // Clear after 3 seconds
+                setTimeout(() => {
+                    document.getElementById('gameContainer').innerHTML = `
+                        <div style="text-align: center; padding: 30px;">
+                            <h3>⏳ Preparing next question...</h3>
+                            <div style="background: #f8f9fa; color: #6c757d; padding: 20px; border-radius: 10px;">
+                                <p>Game in progress...</p>
+                            </div>
+                        </div>
+                    `;
+                }, 3000);
+            }
+
+            socket.on('dealerBeatNotification', (data) => {
+                console.log('🎉 Dealer beat notification received:', data);
+                
+                //  CHECK IF THIS NOTIFICATION IS FOR ME
+                if (data.playerName !== playerName) {
+                    console.log('❌ Notification not for this player, ignoring');
+                    return;
+                }
+                
+                const { message, playerCardValue, dealerCardValue, bonusAwarded, newScore, isDealerBeatingThemselves } = data;
+                
+                //  CREATE SIMPLE AUTO-DISMISSING POPUP
+                const popup = document.createElement('div');
+                popup.id = 'dealerBeatPopup';
+                popup.style.cssText = `
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: linear-gradient(135deg, #28a745, #20c997);
+                    color: white;
+                    padding: 25px;
+                    border-radius: 15px;
+                    text-align: center;
+                    max-width: 300px;
+                    width: 85%;
+                    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+                    border: 3px solid #ffd700;
+                    z-index: 9999;
+                    font-family: 'Arial', sans-serif;
+                    animation: popIn 0.4s ease-out;
+                `;
+                
+                popup.innerHTML = `
+                    <div style="font-size: 40px; margin-bottom: 12px;">
+                        ${isDealerBeatingThemselves ? '👑' : '🎉'}
+                    </div>
+                    <h3 style="margin: 0 0 15px 0; font-size: 20px; font-weight: bold;">
+                        ${message}
+                    </h3>
+                    <div style="background: rgba(255,255,255,0.2); padding: 12px; border-radius: 8px; margin: 12px 0; font-size: 14px;">
+                        <p style="margin: 4px 0;"><strong>Your Cards:</strong> ${playerCardValue}</p>
+                        <p style="margin: 4px 0;"><strong>Dealer Cards:</strong> ${dealerCardValue}</p>
+                        <p style="margin: 4px 0; color: #ffd700; font-size: 16px;"><strong>+${bonusAwarded} Bonus!</strong></p>
+                    </div>
+                    <div style="font-size: 12px; opacity: 0.8; margin-top: 10px;">
+                        Auto-closing in <span id="popupCountdown">3</span>...
+                    </div>
+                `;
+                
+                //  ADD ANIMATION STYLES
+                if (!document.getElementById('popupStyles')) {
+                    const style = document.createElement('style');
+                    style.id = 'popupStyles';
+                    style.textContent = `
+                        @keyframes popIn {
+                            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+                            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+                        }
+                        @keyframes popOut {
+                            0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+                            100% { transform: translate(-50%, -50%) scale(0.8); opacity: 0; }
+                        }
+                    `;
+                    document.head.appendChild(style);
+                }
+                
+                document.body.appendChild(popup);
+                
+                //  AUTO-DISMISS COUNTDOWN (3 SECONDS)
+                let countdown = 3;
+                const countdownElement = document.getElementById('popupCountdown');
+                
+                const countdownInterval = setInterval(() => {
+                    countdown--;
+                    if (countdownElement) {
+                        countdownElement.textContent = countdown;
+                    }
+                    
+                    if (countdown <= 0) {
+                        clearInterval(countdownInterval);
+                        
+                        // Animate out and remove
+                        popup.style.animation = 'popOut 0.3s ease-in';
+                        setTimeout(() => {
+                            if (popup.parentNode) {
+                                popup.parentNode.removeChild(popup);
+                            }
+                        }, 300);
+                    }
+                }, 1000);
+                
+                console.log(' Simple dealer beat popup displayed for 3 seconds');
+            });
+
+            //  UPDATE: Function to close the pop-up (now with cleanup)
+            function closeDealerBeatPopup() {
+                const popup = document.getElementById('dealerBeatPopup');
+                if (popup) {
+                    // Clear countdown interval
+                    if (popup.countdownInterval) {
+                        clearInterval(popup.countdownInterval);
+                    }
+                    
+                    popup.style.animation = 'fadeOut 0.3s ease-in-out';
+                    setTimeout(() => {
+                        if (popup.parentNode) {
+                            popup.parentNode.removeChild(popup);
+                        }
+                    }, 300);
+                    
+                    console.log(' Dealer beat pop-up dismissed');
+                }
+            }

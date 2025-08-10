@@ -1,0 +1,106 @@
+body {
+    background: linear-gradient(135deg, #f5f5f5 60%, #e0e0e0 100%);
+    min-height: 100vh;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    color: #222;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.register-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+}
+
+form {
+    background: #fff;
+    padding: 40px 20px;
+    border-radius: 18px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+    width: 98vw;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+h2 {
+    text-align: center;
+    color: #d4af37; /* gold */
+    margin-bottom: 18px;
+    font-size: 2rem;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+label {
+    font-size: 1.15rem;
+    margin-bottom: 8px;
+    color: #d4af37;
+}
+
+input[type="text"], input[type="password"] {
+    padding: 14px 16px;
+    border-radius: 10px;
+    border: 1px solid #ccc;
+    margin-bottom: 18px;
+    font-size: 1.1rem;
+    background: #f9f9f9;
+    color: #222;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+input:focus {
+    outline: 2px solid #d4af37;
+}
+
+button[type="submit"], button[type="reset"] {
+    background: linear-gradient(90deg, #ffe082 0%, #d4af37 100%);
+    color: #222;
+    font-size: 1.15rem;
+    font-weight: bold;
+    border: none;
+    border-radius: 10px;
+    padding: 16px 0;
+    margin-bottom: 14px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    transition: background 0.2s, transform 0.2s;
+}
+
+button[type="submit"]:hover, button[type="reset"]:hover {
+    background: linear-gradient(90deg, #d4af37 0%, #ffe082 100%);
+    transform: scale(1.04);
+}
+
+a {
+    color: #d4af37;
+    text-decoration: underline;
+    font-weight: 500;
+    font-size: 1.05rem;
+}
+
+span#usernameSpan,
+span#passwordSpan1,
+span#passwordSpan2,
+span#passwordSpan3 {
+    display: block;
+    margin-bottom: 10px;
+    font-size: 1.05rem;
+    color: #e53935;
+}
+
+@media (max-width: 500px) {
+    form {
+        padding: 18px 4px;
+        max-width: 99vw;
+    }
+    label, input, button, a {
+        font-size: 1rem;
+    }
+}

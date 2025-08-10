@@ -1,0 +1,538 @@
+/* ✅ FIXED PAGE LAYOUT - NO SCROLLING */
+html, body {
+    height: 100vh;
+    margin: 0;
+    padding: 0;
+    overflow: hidden; /* Prevent scrolling */
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    box-sizing: border-box;
+}
+
+/* ✅ PREVENT LAYOUT SQUEEZING - FIXED CONTAINER SIZING */
+.game-container {
+    display: flex;
+    height: 100vh;
+    padding: 15px;
+    gap: 15px;
+    box-sizing: border-box;
+    min-width: 100vw; /* Ensure full width */
+    max-width: 100vw; /* Prevent expansion */
+    overflow: hidden; /* Prevent scrolling that causes shifts */
+}
+
+/* ✅ FIXED GAME INFO SECTION - PREVENT EXPANSION */
+.game-info {
+    flex: 0 0 75%; /* Fixed flex: flex-grow: 0, flex-shrink: 0, flex-basis: 75% */
+    max-width: 75%; /* Hard limit */
+    min-width: 75%; /* Minimum width */
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 15px;
+    padding: 20px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+    overflow: hidden; /* Prevent internal overflow */
+}
+
+/* ✅ FIXED SCOREBOARD SECTION - PREVENT SHRINKING */
+.scoreboard {
+    flex: 0 0 25%; /* Fixed flex: no grow, no shrink, 25% basis */
+    max-width: 25%; /* Hard limit */
+    min-width: 25%; /* Minimum width */
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 15px;
+    padding: 20px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+    overflow: hidden; /* Prevent overflow */
+    max-height: 100vh; /* Limit height */
+}
+
+/* ✅ COMPACT ROUND TIMER - BETTER VISIBILITY */
+.round-timer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: linear-gradient(135deg, #28a745, #20c997);
+    color: white;
+    padding: 12px 20px;
+    border-radius: 10px;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+    min-height: 50px; /* Fixed height */
+    max-height: 50px; /* Fixed height */
+    overflow: hidden;
+}
+
+.round-info h2,
+.timer-info h2 {
+    margin: 0;
+    font-size: 1.2em;
+    font-weight: bold;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* ✅ TIMER TEXT - HIGH CONTRAST */
+#timer {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    font-weight: bold;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    min-width: 120px;
+    text-align: center;
+}
+
+/* ✅ SIMPLE DEALER VS PLAYERS SECTION - NO SQUEEZING */
+.players-area {
+    display: flex;
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 15px;
+    min-height: 100px;
+    border: 2px solid #e9ecef;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* ✅ SIMPLE SECTIONS - EQUAL WIDTH */
+.dealer-section,
+.players-section {
+    flex: 1;
+    text-align: center;
+    padding: 10px;
+}
+
+/* ✅ SIMPLE VERTICAL SEPARATOR */
+.dealer-section {
+    border-right: 2px solid #dee2e6;
+    margin-right: 10px;
+    padding-right: 15px;
+}
+
+.players-section {
+    margin-left: 10px;
+    padding-left: 15px;
+}
+
+/* ✅ SIMPLE SECTION TITLES */
+.dealer-section h3,
+.players-section h3 {
+    margin: 0 0 10px 0;
+    font-size: 1.1em;
+    color: #495057;
+    font-weight: bold;
+}
+
+.dealer-section h3 {
+    color: #28a745;
+}
+
+.players-section h3 {
+    color: #007bff;
+}
+
+/* ✅ SIMPLE ICONS */
+.dealer-icon,
+.player-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    color: white;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 1.2em;
+    margin: 5px;
+    border: 2px solid white;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.dealer-icon {
+    background: #28a745;
+}
+
+.player-icon {
+    background: #007bff;
+}
+
+.dealer-icon:hover,
+.player-icon:hover {
+    transform: scale(1.05);
+}
+
+/* ✅ SIMPLE ACTIVE STATE */
+.dealer-icon.active,
+.player-icon.active {
+    border: 3px solid #ffc107 !important;
+    transform: scale(1.1) !important;
+    box-shadow: 0 4px 12px rgba(255, 193, 7, 0.6);
+}
+
+/* ✅ SIMPLE NAME DISPLAYS */
+#dealerNameDisplay,
+#playerNameDisplay {
+    margin-top: 10px;
+    font-size: 0.9em;
+    color: #2c3e50;
+    font-weight: 500;
+    min-height: 20px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-wrap: break-word;
+}
+
+/* ✅ SIMPLE PLAYERS LAYOUT */
+.players-icons {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    min-height: 60px;
+    align-items: center;
+}
+
+/* ✅ QUESTION AREA - CONSTRAINED SIZING */
+.question-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    background: #ffffff;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.1);
+    overflow-y: auto; /* Allow vertical scrolling only */
+    overflow-x: hidden; /* Prevent horizontal overflow */
+    max-height: calc(100vh - 320px); /* Adjusted for smaller players area */
+    min-height: 200px;
+    word-wrap: break-word; /* Prevent text overflow */
+    word-break: break-word; /* Break long words */
+}
+
+/* ✅ PREVENT TEXT OVERFLOW IN QUESTION TEXT */
+.question-text {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    border-left: 4px solid #007bff;
+    margin-bottom: 10px;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+    word-wrap: break-word;
+    word-break: break-word;
+}
+
+/* ✅ OPTIONS GRID - PREVENT EXPANSION */
+.options-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 10px;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.option-item {
+    background: #ffffff;
+    padding: 12px;
+    border-radius: 8px;
+    border: 2px solid #e9ecef;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+    font-size: 0.95em;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+    word-wrap: break-word;
+    word-break: break-word;
+}
+
+.option-item:hover {
+    border-color: #007bff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 123, 255, 0.2);
+}
+
+/* ✅ ANSWER RESULT CONTAINER - PREVENT EXPANSION */
+.answer-result {
+    background: #ffffff;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    margin: 10px 0;
+    max-width: 100%; /* Prevent overflow */
+    box-sizing: border-box;
+    overflow: hidden; /* Prevent content overflow */
+    word-wrap: break-word;
+}
+
+.answer-result h4 {
+    margin: 0 0 15px 0;
+    color: #495057;
+    font-size: 1.2em;
+}
+
+/* ✅ SCANNING COMPLETE STYLING */
+.scanning-complete {
+    text-align: center;
+    padding: 20px;
+}
+
+.scanning-complete h4 {
+    color: #28a745;
+    margin-bottom: 20px;
+}
+
+/* ✅ SCOREBOARD STYLING */
+.scoreboard h3 {
+    margin: 0 0 20px 0;
+    text-align: center;
+    color: #495057;
+    font-size: 1.3em;
+}
+
+/* ✅ SCOREBOARD TABLE - PREVENT EXPANSION */
+.score-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+    table-layout: fixed; /* Prevent table from expanding */
+}
+
+.score-table th,
+.score-table td {
+    padding: 10px 8px;
+    text-align: center;
+    border-bottom: 1px solid #dee2e6;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.score-table th {
+    background: linear-gradient(135deg, #6c757d, #495057);
+    color: white;
+    font-weight: bold;
+    position: sticky;
+    top: 0;
+}
+
+.score-table tbody tr:hover {
+    background: #f8f9fa;
+}
+
+/* ✅ PREVENT LONG PLAYER NAMES FROM BREAKING LAYOUT */
+.score-table td:nth-child(2) {
+    max-width: 120px; /* Limit name column width */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ✅ SLIDING OVERLAYS - IMPROVED VISIBILITY */
+.slide-overlay {
+    position: fixed;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    transition: left 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.slide-overlay.show {
+    left: 0;
+}
+
+.overlay-content {
+    background: linear-gradient(135deg, #ffffff, #f8f9fa);
+    padding: 40px 60px;
+    border-radius: 20px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    border: 3px solid rgba(0, 123, 255, 0.3);
+    max-width: 500px;
+    width: 90%;
+}
+
+.overlay-content div:first-child {
+    font-size: 1.2em;
+    color: #007bff;
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+
+.overlay-content div:nth-child(2) {
+    font-size: 2.5em;
+    font-weight: bold;
+    color: #2c3e50;
+    margin: 15px 0;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.overlay-content div:nth-child(3) {
+    font-size: 1.1em;
+    color: #6c757d;
+    margin-top: 10px;
+}
+
+/* ✅ ENSURE ALL CONTAINERS USE BOX-SIZING */
+* {
+    box-sizing: border-box;
+}
+
+/* ✅ BUTTON STYLING */
+button {
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+/* ✅ ADD TIMER ANIMATIONS */
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+@keyframes flash {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+/* ✅ HIDE ANY POTENTIAL SCROLLBARS */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* ✅ RESPONSIVE ADJUSTMENTS */
+@media (max-width: 1200px) {
+    .game-container {
+        padding: 10px;
+        gap: 10px;
+    }
+    
+    .options-grid {
+        grid-template-columns: 1fr; /* Stack options vertically */
+    }
+    
+    .players-area {
+        flex-direction: column;
+        min-height: auto;
+        max-height: 140px;
+        padding: 15px;
+        gap: 15px;
+    }
+    
+    .dealer-section {
+        border-right: none;
+        border-bottom: 2px solid #dee2e6;
+        padding-bottom: 10px;
+        margin-bottom: 10px;
+        margin-right: 0;
+    }
+    
+    .players-section {
+        margin-left: 0;
+        padding-left: 0;
+        padding-top: 10px;
+    }
+    
+    .dealer-icon,
+    .player-icon {
+        width: 45px;
+        height: 45px;
+        font-size: 1.1em;
+    }
+}
+
+/* ✅ SMALL SCREEN ADJUSTMENTS */
+@media (max-width: 768px) {
+    .game-container {
+        flex-direction: column;
+        height: auto;
+        min-height: 100vh;
+    }
+    
+    .game-info,
+    .scoreboard {
+        flex: none;
+        max-width: 100%;
+        min-width: 100%;
+    }
+    
+    .scoreboard {
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    
+    .players-area {
+        padding: 15px;
+        gap: 10px;
+    }
+    
+    .dealer-icon,
+    .player-icon {
+        width: 40px;
+        height: 40px;
+        font-size: 1em;
+    }
+    
+    #dealerNameDisplay,
+    #playerNameDisplay {
+        font-size: 0.85em;
+    }
+    
+    .dealer-section h3,
+    .players-section h3 {
+        font-size: 1em;
+    }
+}
+
+@keyframes scorePopIn {
+    0% { 
+        transform: translate(-50%, -50%) scale(0.5);
+        opacity: 0;
+    }
+    50% { 
+        transform: translate(-50%, -50%) scale(1.1);
+        opacity: 1;
+    }
+    100% { 
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+    }
+}

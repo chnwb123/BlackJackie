@@ -1,0 +1,131 @@
+body {
+    background: radial-gradient(circle at 50% 30%, #388e3c 60%, #1b5e20 100%);
+    min-height: 100vh;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    color: #fff;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.host-container {
+    display: flex;
+    flex-direction: row;
+    width: 1200px;
+    height: 700px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 18px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    margin: 40px auto;
+    overflow: hidden;
+}
+
+.left-panel {
+    width: 260px;
+    background: rgba(0,0,0,0.18);
+    padding: 32px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    border-right: 2px solid #ffd700;
+}
+
+.right-panel {
+    flex: 1;
+    padding: 32px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+h2, h3, h4 {
+    text-align: center;
+    margin-top: 0;
+    margin-bottom: 18px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+h2 {
+    font-size: 2rem;
+    color: #ffd700;
+    text-shadow: 2px 2px 8px #222, 0 0 18px #ff9800;
+}
+
+h3 {
+    font-size: 1.1rem;
+    color: #fffde7;
+}
+
+img {
+    display: block;
+    margin: 18px auto 16px auto;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    background: #fff;
+    padding: 8px;
+}
+
+#player-list {
+    width: 100%;
+}
+
+ul#players {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+ul#players li {
+    background: rgba(255,255,255,0.15);
+    margin: 8px 0;
+    padding: 8px 16px;
+    border-radius: 8px;
+    color: #ffd700;
+    font-weight: 500;
+    font-size: 1.1rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+ul#players li.dealer {
+    color: #ff9800;
+    font-weight: bold;
+}
+
+#game-status {
+    margin: 18px 0;
+    padding: 12px 24px;
+    background: rgba(255,255,255,0.10);
+    border-radius: 10px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.10);
+    width: 320px;
+    text-align: center;
+}
+
+#start-game {
+    background: linear-gradient(90deg, #ffd700 0%, #ff9800 100%);
+    color: #222;
+    font-size: 1.2rem;
+    font-weight: bold;
+    border: none;
+    border-radius: 8px;
+    padding: 14px 36px;
+    cursor: pointer;
+    margin-top: 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    transition: background 0.2s, transform 0.2s;
+}
+
+#start-game:disabled {
+    background: #aaa;
+    color: #fff;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+#start-game:hover:not(:disabled) {
+    background: linear-gradient(90deg, #ff9800 0%, #ffd700 100%);
+    transform: scale(1.05);
+}

@@ -1,0 +1,31 @@
+doctype html
+html
+    head
+        title= title
+        link(rel="stylesheet", href="/css/Mobile_Register.css")
+        script(src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js")
+        
+    body
+        .register-container
+            h2(style="text-align:center; color:#ffd700; margin-bottom:18px;") Register
+            form(method="post", action=`/Mobile_Register?sessionId=${sessionId}`)
+                label(for="username") Username: 
+                br
+                input#username(type="text", name="username", placeholder="Enter your username", required) 
+                span#usernameSpan
+                br
+                br
+                label(for="password") Password:
+                br
+                input#password(type="password", name="password", placeholder="Enter your password", required)
+                span#passwordSpan1
+                span#passwordSpan2
+                span#passwordSpan3
+                br 
+                br
+                button#register-button(type="submit") Register
+                button(type="reset") Reset
+                p
+                | Have an account? &nbsp;
+                a(href=`/Mobile_Login?sessionId=${sessionId}`) Log In here
+            script(src='/js/Registration_Validation.js')

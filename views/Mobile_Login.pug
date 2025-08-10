@@ -1,0 +1,29 @@
+html
+    head
+        title= title
+        link(rel="stylesheet", href="/css/Mobile_Login.css")
+    body
+        .login-container
+            h2(style="text-align:center; color:#ffd700; margin-bottom:18px;") Log In
+            form(method="post", action=`/Mobile_Login?sessionId=${sessionId}`)
+                label(for="username") Username: 
+                br
+                input#username(type="text", name="username", placeholder="Enter your username", required)
+                br
+                br
+                label(for="password") Password:
+                br
+                input#password(type="password", name="password", placeholder="Enter your password", required)
+                span#passwordSpan1(style="color: red")=invalidDetails
+                br 
+                br
+                button#register-button(type="submit") Log In
+                button(type="reset") Reset
+                p
+                | Don't have an account? &nbsp;
+                a(href=`/Mobile_Register?sessionId=${sessionId}`) Register here
+        
+        script.
+            if (window.location.search.includes('registered=1')) {
+                window.alert('Registered successfully! Please log in.');
+            }

@@ -1,0 +1,120 @@
+html
+    head
+        title= title
+        link(rel="stylesheet", href="/css/Mobile_Users_Lobby.css")
+        script(src="https://cdn.socket.io/4.5.4/socket.io.min.js")
+    body
+        .lobby-container
+            h2 Game Lobby
+            h3= message
+            p Session ID: #{sessionId}
+            p Your Name: #{playerName}
+            
+            div#player-list
+                h4 Players in this game:
+                ul#players
+            
+            div#game-status
+                p#player-count Players: 0/5
+                p#game-state Waiting for players...
+                    
+            script.
+                const socket = io();
+                const sessionId = '#{sessionId}';
+                const playerName = '#{playerName}';
+                const username = '#{studentUsername}';
+                
+                // Join the game session when page loads
+                socket.emit('joinGameSession', {
+                    sessionId: sessionId,
+                    playerName: playerName,
+                    username: username
+                });
+                
+                // Listen for player updates
+                socket.on('playerJoined', (data) => {
+                    updatePlayerList(data.players);
+                    updateGameStatus(data.totalPlayers);
+                });
+                
+                socket.on('playerLeft', (data) => {
+                    updatePlayerList(data.players);
+                    updateGameStatus(data.totalPlayers);
+                });
+                
+                // Handle page unload/navigation away
+                window.addEventListener('beforeunload', () => {
+                    console.log('Mobile: beforeunload triggered');
+                    socket.emit('playerLeave', {
+                        sessionId: sessionId,
+                        playerName: playerName,
+                        username: username 
+                    });
+                });
+                
+                // Handle page visibility change (mobile browsers)
+                document.addEventListener('visibilitychange', () => {
+                    if (document.hidden) {
+                        console.log('Mobile: page hidden, leaving session');
+                        socket.emit('playerLeave', {
+                            sessionId: sessionId,
+                            playerName: playerName,
+                            username: username 
+                        });
+                    }
+                });
+                
+                // Handle page focus loss (additional mobile support)
+                window.addEventListener('pagehide', () => {
+                    console.log('Mobile: pagehide triggered');
+                    socket.emit('playerLeave', { 
+                        sessionId: sessionId,
+                        playerName: playerName,
+                        username: username 
+                    });
+                });
+                
+                // Handle back button and navigation
+                window.addEventListener('popstate', () => {
+                    console.log('Mobile: popstate triggered');
+                    socket.emit('playerLeave', { 
+                        sessionId: sessionId,
+                        playerName: playerName,
+                        username: username 
+                    });
+                });
+                
+                function updatePlayerList(players) {
+                    const playersList = document.getElementById('players');
+                    playersList.innerHTML = '';
+                    
+                    players.forEach(player => {
+                        const li = document.createElement('li');
+                        li.textContent = player.name + (player.isDealer ? ' (Dealer)' : '');
+                        playersList.appendChild(li);
+                    });
+                }
+                
+                function updateGameStatus(playerCount) {
+                    document.getElementById('player-count').textContent = `Players: ${playerCount}/5`;
+                }
+
+                socket.on('gameStarted', (data) => {
+                    console.log('Game started!', data);
+                    console.log('Dealer:', data.dealer.name);
+                    console.log('Current Round:', data.currentRound);
+                    
+                    // Show loading screen
+                    document.body.innerHTML = `
+                        <div style="text-align: center; padding: 50px;">
+                            <h2>Game Starting!</h2>
+                            <p>Redirecting to gameplay...</p>
+                        </div>
+                    `;
+                    
+                    // Small delay to ensure data is processed
+                    setTimeout(() => {
+                        const gameplayUrl = `/Gameplay_Mobile?sessionId=${sessionId}&playerName=${encodeURIComponent(playerName)}&username=${encodeURIComponent(username)}&round=${data.currentRound}`;
+                        window.location.href = gameplayUrl;
+                    }, 5000);
+                });

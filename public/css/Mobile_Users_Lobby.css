@@ -1,0 +1,111 @@
+body {
+    background: linear-gradient(135deg, #f5f5f5 60%, #e0e0e0 100%);
+    min-height: 100vh;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    color: #222;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.lobby-container {
+    background: #fff;
+    padding: 40px 20px;
+    border-radius: 18px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+    width: 98vw;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+h2 {
+    text-align: center;
+    color: #d4af37;
+    margin-bottom: 12px;
+    font-size: 2rem;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+h3 {
+    text-align: center;
+    color: #222;
+    margin-bottom: 18px;
+    font-size: 1.15rem;
+    font-weight: 500;
+}
+
+p {
+    text-align: center;
+    margin-bottom: 10px;
+    font-size: 1.05rem;
+}
+
+#player-list {
+    background: rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 12px 8px;
+    margin: 16px 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    width: 100%;
+}
+
+h4 {
+    color: #d4af37;
+    text-align: center;
+    margin-bottom: 8px;
+    font-size: 1.1rem;
+    font-weight: bold;
+}
+
+ul#players {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    text-align: center;
+}
+
+ul#players li {
+    background: rgba(255,255,255,0.15);
+    margin: 6px 0;
+    padding: 8px 12px;
+    border-radius: 8px;
+    color: #d4af37;
+    font-weight: 500;
+    font-size: 1.05rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    display: inline-block;
+}
+
+ul#players li.dealer {
+    color: #ff9800;
+    font-weight: bold;
+}
+
+#game-status {
+    margin: 18px 0;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.10);
+    border-radius: 10px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.10);
+    width: 100%;
+    text-align: center;
+}
+
+#player-count, #game-state {
+    font-size: 1.05rem;
+    margin: 4px 0;
+}
+
+@media (max-width: 500px) {
+    .lobby-container {
+        padding: 18px 4px;
+        max-width: 99vw;
+    }
+    h2, h3, h4, p, ul#players li {
+        font-size: 1rem;
+    }
+}

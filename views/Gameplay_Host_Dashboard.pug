@@ -1,0 +1,1525 @@
+html
+    head
+        title= title
+        script(src="https://cdn.socket.io/4.5.4/socket.io.min.js")
+        link(rel="stylesheet", href="/css/Gameplay_Host_Dashboard.css")
+
+    body
+        // Sliding overlays
+        .slide-overlay#dealerAnnouncement
+            .overlay-content
+                div Dealer for Round #{currentRound || 1}
+                div#dealerName #{dealerName || 'Selecting...'}
+        
+        .slide-overlay#cardScanOverlay
+            .overlay-content
+                div 📱
+                div Scan the QR codes of your allocated cards
+        
+        .slide-overlay#playerTurnOverlay
+            .overlay-content
+                div Selected Player:
+                div#currentPlayerName Player Name
+        
+        // Main game container
+        .game-container
+            // Left side - Game info and players
+            .game-info
+                .round-timer
+                    .round-info
+                        h2 Round: #{currentRound || 1}/5
+                    .timer-info
+                        h2#timer Timer: 1:00
+                
+                .players-area
+                    .dealer-section
+                        h3 Dealer
+                        .dealer-icon#dealerIcon #{dealerName ? dealerName.charAt(0).toUpperCase() : 'D'}
+                        p#dealerNameDisplay #{dealerName || 'Selecting dealer...'}
+                    
+                    .players-section
+                        h3 Players
+                        .players-icons#playerIcons
+                            // Will be populated by JavaScript
+                        p#playerNameDisplay 
+                
+                .question-area#questionArea(style="display: none;")
+                    .question-text#questionText Question will appear here...
+                    .options-grid#optionsGrid
+                        .option-item A) Option 1
+                        .option-item B) Option 2
+                        .option-item C) Option 3
+                        .option-item D) Option 4
+            
+            // Right side - Scoreboard
+            .scoreboard
+                h3 🏆 Scoreboard
+                table.score-table
+                    thead
+                        tr
+                            th Rank
+                            th Player
+                            th Points
+                    tbody#scoreboardBody
+                        // Will be populated by JavaScript
+
+        script.
+            const socket = io();
+            const sessionId = '#{sessionId}';
+            let currentGameData = null;
+            let playerScanProgress = {};
+
+            // Connect and wait for game data
+            socket.emit('gameplayHostDashboard', { sessionId: sessionId });
+            
+            // Handle initial game started event
+            socket.on('hostGameData', (data) => {
+                console.log('Received game data from server:', data);
+                currentGameData = data;
+
+                playerScanProgress = {};
+                if (data.players && data.players.length > 0) {
+                    data.players.forEach(player => {
+                        playerScanProgress[player.name] = {
+                            id: player.id,
+                            name: player.name,
+                            role: player.isDealer ? 'Dealer' : 'Player',
+                            scannedCount: 0,
+                            isComplete: false
+                        };
+                    });
+                }
+                
+                updateGameDisplay(currentGameData);
+                
+                setTimeout(() => {
+                    showDealerAnnouncement(currentGameData.dealer);
+                }, 2500);
+            });
+            
+            function updateGameDisplay(gameData) {
+                // Update dealer display
+                const dealerIcon = document.getElementById('dealerIcon');
+                const dealerNameDisplay = document.getElementById('dealerNameDisplay');
+                if (gameData.dealer) {
+                    dealerIcon.textContent = gameData.dealer.name.charAt(0).toUpperCase();
+                    dealerNameDisplay.textContent = gameData.dealer.name;
+                }
+                
+                // Update players display
+                updatePlayersDisplay(gameData.players);
+                
+                // Update scoreboard
+                populateInitialScoreboard(gameData.players);
+            }
+
+            function populateInitialScoreboard(players) {
+                console.log('📊 Populating scoreboard with', players.length, 'players');
+                
+                const scoreboardBody = document.getElementById('scoreboardBody');
+                if (!scoreboardBody) return;
+                
+                scoreboardBody.innerHTML = '';
+                
+                players.forEach((player, index) => {
+                    const newRow = document.createElement('tr');
+                    newRow.innerHTML = `
+                        <td>${index + 1}</td>
+                        <td>${player.name}${player.isDealer ? ' (Dealer)' : ''}</td>
+                        <td>${player.currentScore || player.score || 0}</td>
+                    `;
+                    scoreboardBody.appendChild(newRow);
+                });
+            }
+
+
+            // QR scanning emit function
+            function emitQRScanningStart() {
+                console.log('Starting QR scanning phase for all players...');
+
+                playerScanProgress = {}; // Reset progress tracking
+                
+                socket.emit('startQRScanning', {
+                    sessionId: sessionId,
+                    dealerId: currentGameData.dealer.id,
+                    allPlayers: currentGameData.players,
+                    dealerName: currentGameData.dealer.name,
+                    message: 'Everyone scan your 2 allocated cards now!',
+                    scanDuration: 45000, // 45 seconds for everyone to scan
+                    cardsPerPlayer: 2,
+                    specialInstructions: {
+                        dealer: 'As dealer, you will distribute cards and scan the 2 cards',
+                        players: 'As as player, you will wait for the dealer to distribute the 2 cards. Then scan your 2 cards.'
+                    }
+                });
+            }
+
+            // Shows scan card
+            function showCardScanMessage() {
+                const overlay = document.getElementById('cardScanOverlay');
+                overlay.classList.add('show');
+                
+                // Emit QR scanning when overlay shows
+                emitQRScanningStart();
+                
+                // Hide after 4 seconds
+                setTimeout(() => {
+                    overlay.classList.remove('show');
+                    
+                    // Wait for scanning to complete instead of starting questions immediately
+                    setTimeout(() => {
+                        waitForAllScansComplete();
+                    }, 1000);
+                }, 4000);
+            }
+
+            // function to wait for all scans
+            function waitForAllScansComplete() {
+                console.log('Waiting for all players to complete scanning...');
+                
+                //  GET CURRENT ROUND FROM GAME DATA
+                const currentRound = currentGameData?.currentRound || 1;
+                
+                // Show scanning progress with CORRECT ROUND
+                const questionArea = document.getElementById('questionArea');
+                if (questionArea) {
+                    questionArea.innerHTML = `
+                        <div class="question-text" id="questionText">
+                            <div style="text-align: center; padding: 30px;">
+                                <h3>⏳ Round ${currentRound} - Card Scanning in Progress</h3>
+                                <p>Players are scanning their ${currentRound === 1 ? 'initial' : 'new'} cards...</p>
+                                <div id="roundScanProgress">
+                                    <p>Scanned: <span id="scannedPlayersCount">0</span>/${currentGameData.players.length}</p>
+                                    <p>This will update automatically as players scan</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="options-grid" id="optionsGrid">
+                            <!-- Options will appear here when question is presented -->
+                        </div>
+                    `;
+                    questionArea.style.display = 'block';
+                }
+            }
+
+            // Update your updatePlayersDisplay function (around line 160):
+            function updatePlayersDisplay(players) {
+                console.log('👥 Updating players display with:', players); // Debug log
+                
+                const playerIcons = document.getElementById('playerIcons');
+                const playerNameDisplay = document.getElementById('playerNameDisplay');
+                
+                if (!playerIcons) {
+                    console.error('❌ playerIcons element not found');
+                    return;
+                }
+                
+                playerIcons.innerHTML = '';
+                
+                //  GET ALL NON-DEALER PLAYERS
+                const nonDealerPlayers = players.filter(player => {
+                    console.log(`Checking player: ${player.name}, isDealer: ${player.isDealer}`); // Debug
+                    return !player.isDealer;
+                });
+                
+                console.log(`📊 Found ${nonDealerPlayers.length} non-dealer players:`, nonDealerPlayers.map(p => p.name));
+                
+                //  CHECK IF WE HAVE PLAYERS TO DISPLAY
+                if (nonDealerPlayers.length === 0) {
+                    console.warn('⚠️ No non-dealer players found');
+                    playerIcons.innerHTML = '<div style="color: #6c757d; font-style: italic; font-size: 0.9em;">No players found</div>';
+                    
+                    if (playerNameDisplay) {
+                        playerNameDisplay.innerHTML = '<div style="color: #6c757d; font-size: 0.9em;">Waiting for players...</div>';
+                    }
+                    return;
+                }
+                
+                //  CREATE SIMPLE PLAYER ICONS
+                nonDealerPlayers.forEach((player, index) => {
+                    const playerDiv = document.createElement('div');
+                    playerDiv.className = 'player-icon';
+                    playerDiv.id = `playerIcon-${player.id || player.name || index}`;
+                    playerDiv.textContent = player.name.charAt(0).toUpperCase();
+                    playerDiv.title = player.name; // Simple tooltip
+                    
+                    //  ADD DATA ATTRIBUTES FOR EASIER IDENTIFICATION
+                    playerDiv.setAttribute('data-player-name', player.name);
+                    playerDiv.setAttribute('data-player-id', player.id || player.name);
+                    
+                    //  SIMPLE CLICK EVENT
+                    playerDiv.addEventListener('click', () => {
+                        console.log(`🎯 Player icon clicked: ${player.name}`);
+                        
+                        // Remove previous highlights from all player icons
+                        document.querySelectorAll('.player-icon').forEach(icon => {
+                            icon.style.border = '2px solid white';
+                            icon.style.transform = 'scale(1)';
+                            icon.style.boxShadow = '';
+                        });
+                        
+                        // Highlight clicked player
+                        playerDiv.style.border = '3px solid #ffc107';
+                        playerDiv.style.transform = 'scale(1.1)';
+                        playerDiv.style.boxShadow = '0 4px 12px rgba(255, 193, 7, 0.6)';
+                        
+                        // Update name display
+                        if (playerNameDisplay) {
+                            playerNameDisplay.innerHTML = `
+                                <strong style="color: #007bff;">🎯 Selected: ${player.name}</strong>
+                                <div style="font-size: 0.8em; color: #6c757d; margin-top: 5px;">
+                                    Player ${index + 1} of ${nonDealerPlayers.length} • Score: ${player.score || player.currentScore || 0}
+                                </div>
+                            `;
+                        }
+                    });
+                    
+                    //  SIMPLE HOVER EFFECTS
+                    playerDiv.addEventListener('mouseenter', () => {
+                        if (!playerDiv.style.border.includes('#ffc107')) { // Don't affect selected players
+                            playerDiv.style.transform = 'scale(1.05)';
+                        }
+                    });
+                    
+                    playerDiv.addEventListener('mouseleave', () => {
+                        if (!playerDiv.style.border.includes('#ffc107')) { // Don't affect selected players
+                            playerDiv.style.transform = 'scale(1)';
+                        }
+                    });
+                    
+                    playerIcons.appendChild(playerDiv);
+                    
+                    console.log(` Added player icon for: ${player.name}`);
+                });
+                
+                //  SHOW ALL PLAYER NAMES INITIALLY (SIMPLE FORMAT)
+                if (playerNameDisplay && nonDealerPlayers.length > 0) {
+                    playerNameDisplay.innerHTML = `
+                        <div style="color: #007bff; font-weight: 500; font-size: 0.95em; margin-bottom: 5px;">
+                            👥 ${nonDealerPlayers.length} Player${nonDealerPlayers.length > 1 ? 's' : ''}
+                        </div>
+                        <div style="color: #6c757d; font-size: 0.85em; line-height: 1.2;">
+                            ${nonDealerPlayers.map((p, i) => `${i + 1}. ${p.name}`).join(', ')}
+                        </div>
+                        <div style="color: #6c757d; font-size: 0.75em; margin-top: 5px; font-style: italic;">
+                            Click icon to select
+                        </div>
+                    `;
+                }
+                
+                console.log(` Players display updated successfully with ${nonDealerPlayers.length} players`);
+            }
+            
+            //  REPLACE your existing updateScoreboard function with this:
+            function updateScoreboard(allScores, updatedPlayer, currentRound) {
+                console.log('📊 Updating scoreboard with:', { allScores, updatedPlayer, currentRound });
+                
+                const scoreboardBody = document.getElementById('scoreboardBody');
+                if (!scoreboardBody) {
+                    console.error('❌ scoreboardBody element not found');
+                    return;
+                }
+                
+                // Clear existing rows
+                scoreboardBody.innerHTML = '';
+                
+                //  HANDLE DIFFERENT DATA STRUCTURES
+                let scores = [];
+                
+                if (allScores && Array.isArray(allScores)) {
+                    scores = allScores.map(player => ({
+                        name: player.name,
+                        score: parseInt(player.score) || parseInt(player.currentScore) || parseInt(player.totalScore) || 0,
+                        role: player.role || (player.isDealer ? 'Dealer' : 'Player')
+                    }));
+                } else if (currentGameData && currentGameData.players) {
+                    scores = currentGameData.players.map(p => ({
+                        name: p.name,
+                        score: parseInt(p.score) || parseInt(p.currentScore) || parseInt(p.totalScore) || 0,
+                        role: p.isDealer ? 'Dealer' : 'Player'
+                    }));
+                }
+                
+                //  ALWAYS SORT BY SCORE (HIGHEST FIRST)
+                const sortedScores = scores.sort((a, b) => {
+                    const scoreA = parseInt(a.score) || 0;
+                    const scoreB = parseInt(b.score) || 0;
+                    return scoreB - scoreA; // DESCENDING ORDER (highest first)
+                });
+                
+                console.log('📊 Sorted scores for display:', sortedScores);
+                
+                //  POPULATE SCOREBOARD WITH CORRECT RANKING
+                sortedScores.forEach((player, index) => {
+                    const newRow = document.createElement('tr');
+                    
+                    // Add highlighting for recently updated player
+                    const isUpdatedPlayer = updatedPlayer && 
+                        (player.name === updatedPlayer.name || player.name === updatedPlayer);
+                    
+                    if (isUpdatedPlayer) {
+                        newRow.style.backgroundColor = '#fff3cd';
+                        newRow.style.transition = 'background-color 2s ease';
+                    }
+                    
+                    //  RANK IS BASED ON SORTED POSITION (1st = highest score)
+                    const rank = index + 1;
+                    const playerScore = parseInt(player.score) || 0;
+                    
+                    newRow.innerHTML = `
+                        <td style="text-align: center; font-weight: bold; color: ${rank === 1 ? '#ffc107' : rank === 2 ? '#6c757d' : rank === 3 ? '#dc3545' : '#007bff'};">
+                            ${rank}
+                        </td>
+                        <td style="max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${player.name}">
+                            ${player.name}${player.role === 'Dealer' ? ' 👑' : ''}
+                        </td>
+                        <td style="text-align: center; font-weight: bold; color: #007bff;">
+                            ${playerScore}
+                            ${isUpdatedPlayer && updatedPlayer.scoreGained > 0 ? 
+                                `<span style="color: #28a745; font-size: 0.8em;">+${updatedPlayer.scoreGained}</span>` : ''}
+                        </td>
+                    `;
+                    
+                    scoreboardBody.appendChild(newRow);
+                    
+                    // Remove highlighting after 2 seconds
+                    if (isUpdatedPlayer) {
+                        setTimeout(() => {
+                            newRow.style.backgroundColor = '';
+                        }, 2000);
+                    }
+                });
+                
+                console.log(` Scoreboard updated with ${sortedScores.length} players in DESCENDING ORDER`);
+            }
+            
+            function showDealerAnnouncement(dealer) {
+                const overlay = document.getElementById('dealerAnnouncement');
+                const dealerNameElement = document.getElementById('dealerName');
+                
+                //  GET CURRENT ROUND FROM GAME DATA
+                const currentRound = currentGameData?.currentRound || 1;
+                
+                //  UPDATE BOTH DEALER NAME AND ROUND
+                dealerNameElement.textContent = dealer.name;
+                
+                //  UPDATE THE ROUND TEXT IN THE OVERLAY
+                const overlayContent = overlay.querySelector('.overlay-content');
+                overlayContent.innerHTML = `
+                    <div>Dealer for Round ${currentRound}</div>
+                    <div id="dealerName">${dealer.name}</div>
+                `;
+                
+                overlay.classList.add('show');
+                
+                // Hide after 6 seconds, then show original page for 4 seconds
+                setTimeout(() => {
+                    overlay.classList.remove('show');
+                    
+                    setTimeout(() => {
+                        showCardScanMessage();
+                    }, 4000);
+                }, 5000);
+            }
+
+            function startQuestionPhase() {
+                console.log('🎯 Starting question phase...');
+                
+                // Clear the scanning area
+                document.getElementById('questionArea').innerHTML = `
+                    <div style="text-align: center; padding: 20px;">
+                        <h3>🎮 Preparing Questions...</h3>
+                        <p>Get ready for the first question!</p>
+                    </div>
+                `;
+                
+                // Request first question from database
+                socket.emit('requestNextQuestion', {
+                    sessionId: sessionId,
+                    currentRound: currentGameData.currentRound || 1
+                });
+            }
+
+            // Handler for player turn announcement
+            socket.on('playerTurnAnnouncement', (data) => {
+                console.log('🎯 Player turn announcement:', data);
+                
+                const { currentPlayer, turnNumber, totalPlayers, playerRole, currentRound, totalRounds } = data;
+                
+                if (currentGameData) {
+                    currentGameData.currentRound = currentRound;
+                }
+                
+                //  SHOW THE SLIDING PLAYER TURN OVERLAY WITH CORRECT ROUND
+                showPlayerTurnAnnouncement(currentPlayer, turnNumber, currentRound);
+                
+                // Update round info
+                const roundInfo = document.querySelector('.round-info h2');
+                if (roundInfo) {
+                    roundInfo.textContent = `Round: ${currentRound}/${totalRounds}`;
+                }
+                
+                // Update current player indicator
+                const playerNameDisplay = document.getElementById('playerNameDisplay');
+                if (playerNameDisplay) {
+                    playerNameDisplay.innerHTML = `
+                        <strong style="color: #007bff;">➤ Getting Question: ${currentPlayer.name}</strong>
+                        <div style="font-size: 0.8em; color: #6c757d;">
+                            ${playerRole} - Turn ${turnNumber}/${totalPlayers}
+                        </div>
+                    `;
+                }
+                
+                // Rest of your existing questionArea code...
+                const questionArea = document.getElementById('questionArea');
+                if (questionArea) {
+                    questionArea.style.display = 'block';
+                    
+                    const questionText = document.getElementById('questionText');
+                    if (questionText) {
+                        questionText.innerHTML = `
+                            <div style="text-align: center; padding: 20px;">
+                                <h4>⏳ Preparing question for ${currentPlayer.name}...</h4>
+                                <p>Question will appear in 4 seconds</p>
+                                
+                                <div style="background: #f8f9fa; border-radius: 10px; padding: 15px; margin: 15px 0;">
+                                    <div style="color: #6c757d; font-size: 0.9em; margin-bottom: 5px;">Question Loading...</div>
+                                    <div style="background: #e9ecef; border-radius: 5px; height: 8px; overflow: hidden;">
+                                        <div id="prepTimer" style="background: linear-gradient(90deg, #007bff, #0056b3); height: 100%; width: 0%; transition: width 4s linear;"></div>
+                                    </div>
+                                    <div style="font-size: 0.8em; color: #6c757d; margin-top: 5px;">0/4 seconds</div>
+                                </div>
+                            </div>
+                        `;
+                        
+                        setTimeout(() => {
+                            const prepTimer = document.getElementById('prepTimer');
+                            if (prepTimer) {
+                                prepTimer.style.width = '100%';
+                            }
+                        }, 100);
+                    }
+                    
+                    const optionsGrid = document.getElementById('optionsGrid');
+                    if (optionsGrid) {
+                        optionsGrid.innerHTML = '<div style="text-align: center; color: #6c757d;">Options loading...</div>';
+                    }
+                }
+            });
+
+            // Handler for question presented
+            socket.on('questionPresented', (data) => {
+                console.log('📝 Question presented:', data);
+                
+                const { question, currentPlayer, timeLimit, bonusInfo, gameProgress } = data;
+                
+                //  START THE MAIN TIMER IN .round-timer
+                startTimer(timeLimit);
+                
+                // Update round info
+                const roundInfo = document.querySelector('.round-info h2');
+                if (roundInfo) {
+                    roundInfo.textContent = `Round: ${gameProgress.currentRound}/${gameProgress.totalRounds}`;
+                }
+                
+                // Show question area
+                const questionArea = document.getElementById('questionArea');
+                if (questionArea) {
+                    questionArea.style.display = 'block';
+                    
+                    //  SIMPLIFIED QUESTION TEXT (no duplicate timer since we're using .round-timer)
+                    const questionText = document.getElementById('questionText');
+                    if (questionText) {
+                        questionText.innerHTML = `
+                            <div style="margin-bottom: 15px;">
+                                <h4>📝 Question for: ${currentPlayer.isDealer ? 'Dealer' : 'Player'} ${currentPlayer.name}</h4>
+                                
+                                <div style="font-size: 1.1em; font-weight: bold; margin: 10px 0; color: #004085; background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #007bff;">
+                                    ${question.question_text || question.text || question.question || 'Question text not available'}
+                                </div>
+                                <div style="color: #6c757d; font-size: 0.9em;">
+                                    Difficulty: ${question.difficulty} | Total Time: ${timeLimit}s
+                                </div>
+                            </div>
+                            
+                            ${bonusInfo ? `
+                                <div style="background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin: 10px 0; font-size: 0.9em; border: 1px solid #c3e6cb;">
+                                    🎁 <strong>${bonusInfo.description}</strong> - Easier questions + ${bonusInfo.bonusMarks} bonus points!
+                                </div>
+                            ` : ''}
+                        `;
+                    }
+                    
+                    // Update options grid (your existing code)
+                    const optionsGrid = document.getElementById('optionsGrid');
+                    if (optionsGrid) {
+                        let options = [];
+                        
+                        if (question.option_a && question.option_b) {
+                            options = [
+                                question.option_a,
+                                question.option_b,
+                                question.option_c,
+                                question.option_d
+                            ].filter(opt => opt && opt.trim() !== '');
+                        } else if (question.options) {
+                            try {
+                                options = typeof question.options === 'string' ? 
+                                    JSON.parse(question.options) : question.options;
+                            } catch (e) {
+                                console.error('Failed to parse options:', e);
+                            }
+                        }
+                        
+                        if (options && options.length > 0) {
+                            optionsGrid.innerHTML = options.map((option, index) => 
+                                `<div class="option-item" style="background: #f8f9fa; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #dee2e6; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                                    <strong style="color: #007bff;">${String.fromCharCode(65 + index)})</strong> ${option}
+                                </div>`
+                            ).join('');
+                        } else {
+                            optionsGrid.innerHTML = `
+                                <div style="background: #f8f9fa; color: #6c757d; padding: 15px; border-radius: 5px; text-align: center; font-style: italic;">
+                                    📝 This is an open-ended question - no multiple choice options
+                                </div>
+                            `;
+                        }
+                    }
+                }
+                
+                // Update current player display
+                const playerNameDisplay = document.getElementById('playerNameDisplay');
+                if (playerNameDisplay) {
+                    playerNameDisplay.innerHTML = `
+                        <strong style="color: #dc3545;">🎯 ANSWERING: ${currentPlayer.name}</strong>
+                        <div style="font-size: 0.8em; color: #6c757d;">
+                            Turn ${gameProgress.currentTurn} of ${gameProgress.totalPlayers} | ${timeLimit}s to answer
+                        </div>
+                    `;
+                }
+                
+                console.log(' Question displayed with main timer started');
+            });
+            
+            function showPlayerTurnAnnouncement(player, turnNumber, currentRound = 1) {
+                const overlay = document.getElementById('playerTurnOverlay');
+                
+                //  UPDATE OVERLAY CONTENT WITH CORRECT ROUND
+                const overlayContent = overlay.querySelector('.overlay-content');
+                overlayContent.innerHTML = `
+                    <div style="font-size: 1.4em; color: #007bff; margin-bottom: 10px;">
+                        🎯 Round ${currentRound} - ${player.isDealer ? 'Dealer' : 'Player'} Turn
+                    </div>
+                    <div style="font-size: 2.8em; font-weight: bold; margin: 15px 0; color: #2c3e50;">
+                        ${player.name}
+                    </div>
+                    <div style="font-size: 1.2em; color: #6c757d; margin-bottom: 10px;">
+                        Turn ${turnNumber}
+                    </div>
+                    <div style="font-size: 1em; color: #6c757d; background: rgba(0, 123, 255, 0.1); padding: 10px; border-radius: 15px;">
+                        ⏳ Getting question ready...
+                    </div>
+                `;
+                
+                overlay.classList.add('show');
+                
+                //  HIGHLIGHT THE CURRENT PLAYER ICON
+                highlightCurrentPlayerIcon(player);
+                
+                console.log(`🎯 Showing turn overlay for ${player.name} in Round ${currentRound}`);
+                
+                setTimeout(() => {
+                    overlay.classList.remove('show');
+                }, 3000);
+            }
+            
+            function startTimer(seconds) {
+                const timerElement = document.getElementById('timer');
+                let timeLeft = seconds;
+                
+                // Clear any existing timer
+                if (window.gameTimer) {
+                    clearInterval(window.gameTimer);
+                }
+                
+                window.gameTimer = setInterval(() => {
+                    const minutes = Math.floor(timeLeft / 60);
+                    const secs = timeLeft % 60;
+                    timerElement.textContent = `${minutes}:${secs.toString().padStart(2, '0')}`;
+                    
+                    //  IMPROVED COLOR CODING WITH HIGH CONTRAST
+                    if (timeLeft <= 10) {
+                        // Critical - Red background with white text
+                        timerElement.style.background = 'linear-gradient(135deg, #dc3545, #c82333)';
+                        timerElement.style.color = '#ffffff';
+                        timerElement.style.fontWeight = 'bold';
+                        timerElement.style.border = '2px solid #ffffff';
+                        timerElement.style.animation = 'pulse 1s infinite';
+                    } else if (timeLeft <= 30) {
+                        // Warning - Orange background with white text
+                        timerElement.style.background = 'linear-gradient(135deg, #fd7e14, #e55a00)';
+                        timerElement.style.color = '#ffffff';
+                        timerElement.style.fontWeight = 'bold';
+                        timerElement.style.border = '2px solid #ffffff';
+                        timerElement.style.animation = 'none';
+                    } else {
+                        // Normal - Keep the green background with white text
+                        timerElement.style.background = 'rgba(255, 255, 255, 0.2)';
+                        timerElement.style.color = '#ffffff';
+                        timerElement.style.fontWeight = 'bold';
+                        timerElement.style.border = '2px solid rgba(255, 255, 255, 0.3)';
+                        timerElement.style.animation = 'none';
+                    }
+                    
+                    timeLeft--;
+                    
+                    if (timeLeft < 0) {
+                        clearInterval(window.gameTimer);
+                        timerElement.textContent = 'TIME UP!';
+                        timerElement.style.background = 'linear-gradient(135deg, #dc3545, #c82333)';
+                        timerElement.style.color = '#ffffff';
+                        timerElement.style.animation = 'flash 0.5s infinite';
+                    }
+                }, 1000);
+            }
+
+            function highlightCurrentPlayerIcon(currentPlayer) {
+                // Reset all player icons
+                document.querySelectorAll('.player-icon').forEach(icon => {
+                    icon.style.border = '3px solid rgba(255, 255, 255, 0.8)';
+                    icon.style.transform = 'scale(1)';
+                });
+                
+                // Reset dealer icon
+                const dealerIcon = document.getElementById('dealerIcon');
+                if (dealerIcon) {
+                    dealerIcon.style.border = '3px solid rgba(255, 255, 255, 0.8)';
+                    dealerIcon.style.transform = 'scale(1)';
+                }
+                
+                // Highlight current player
+                if (currentPlayer.isDealer) {
+                    // Highlight dealer
+                    if (dealerIcon) {
+                        dealerIcon.style.border = '4px solid #ffc107';
+                        dealerIcon.style.transform = 'scale(1.15)';
+                        dealerIcon.style.boxShadow = '0 6px 20px rgba(255, 193, 7, 0.6)';
+                    }
+                } else {
+                    // Highlight player
+                    const playerIcons = document.querySelectorAll('.player-icon');
+                    playerIcons.forEach(icon => {
+                        if (icon.title === currentPlayer.name || icon.textContent === currentPlayer.name.charAt(0).toUpperCase()) {
+                            icon.style.border = '4px solid #ffc107';
+                            icon.style.transform = 'scale(1.15)';
+                            icon.style.boxShadow = '0 6px 20px rgba(255, 193, 7, 0.6)';
+                        }
+                    });
+                }
+            }
+
+            // Handler for player answered
+            //  UPDATED playerAnswered handler - lines around 475:
+            socket.on('playerAnswered', (data) => {
+                console.log('📊 Player answered:', data);
+                
+                const { playerName, answer, isCorrect, correctAnswer, scoreGained, newScore, timedOut } = data;
+                
+                //  STOP THE MAIN TIMER
+                if (window.gameTimer) {
+                    clearInterval(window.gameTimer);
+                    window.gameTimer = null;
+                }
+                
+                //  RESET TIMER DISPLAY
+                const timerElement = document.getElementById('timer');
+                if (timerElement) {
+                    timerElement.textContent = 'Timer: 1:00';
+                    timerElement.style.background = 'rgba(255, 255, 255, 0.2)';
+                    timerElement.style.color = '#ffffff';
+                    timerElement.style.fontWeight = 'bold';
+                    timerElement.style.border = '2px solid rgba(255, 255, 255, 0.3)';
+                    timerElement.style.animation = 'none';
+                }
+                
+                //  UPDATE CURRENT GAME DATA WITH NEW SCORE
+                if (currentGameData && currentGameData.players) {
+                    const playerToUpdate = currentGameData.players.find(p => p.name === playerName);
+                    if (playerToUpdate) {
+                        playerToUpdate.score = newScore;
+                        playerToUpdate.currentScore = newScore;
+                        playerToUpdate.totalScore = newScore;
+                    }
+                }
+                
+                //  UPDATE QUESTION TEXT WITH FIXED SIZING
+                const questionText = document.getElementById('questionText');
+                if (questionText) {
+                    questionText.style.maxWidth = '100%';
+                    questionText.style.boxSizing = 'border-box';
+                    questionText.style.overflow = 'hidden';
+                    
+                    questionText.innerHTML = `
+                        <div class="answer-result" style="max-width: 100%; box-sizing: border-box; overflow: hidden; word-wrap: break-word;">
+                            <h4 style="margin: 0 0 15px 0; font-size: 1.2em;">📊 ${playerName}'s Answer:</h4>
+                            
+                            <div style="font-size: 1.1em; margin: 10px 0; word-wrap: break-word; max-width: 100%;">
+                                <strong style="color: #495057;">"${answer}"</strong>
+                                ${timedOut ? ' <span style="color: #dc3545; font-size: 0.9em;">(⏰ Timed out)</span>' : ''}
+                            </div>
+                            
+                            <div style="background: ${isCorrect ? '#d4edda' : '#f8d7da'}; color: ${isCorrect ? '#155724' : '#721c24'}; padding: 15px; border-radius: 8px; margin: 15px 0; max-width: 100%; box-sizing: border-box; word-wrap: break-word;">
+                                <strong>${isCorrect ? ' Correct!' : '❌ Incorrect'}</strong><br>
+                                <div style="margin-top: 8px; font-size: 0.95em;">
+                                    <strong>Correct Answer:</strong> ${correctAnswer}
+                                </div>
+                            </div>
+                            
+                            <div style="background: #e7f3ff; color: #004085; padding: 12px; border-radius: 5px; margin: 15px 0; max-width: 100%; box-sizing: border-box;">
+                                <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                                    <span><strong>Points Gained:</strong> ${scoreGained}</span>
+                                    <span><strong>New Score:</strong> ${newScore}</span>
+                                </div>
+                            </div>
+                            
+                            <div style="color: #6c757d; font-style: italic; text-align: center; margin-top: 15px; font-size: 0.9em; max-width: 100%; word-wrap: break-word;">
+                                ⏳ Moving to next player in 3 seconds...
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                //  CLEAR OPTIONS GRID TO PREVENT LAYOUT ISSUES
+                const optionsGrid = document.getElementById('optionsGrid');
+                if (optionsGrid) {
+                    optionsGrid.innerHTML = '';
+                    optionsGrid.style.display = 'none';
+                }
+                
+                //  UPDATE SCOREBOARD WITH FULL RE-SORTING (NOT JUST INDIVIDUAL UPDATE)
+                if (currentGameData && currentGameData.players) {
+                    const updatedScores = currentGameData.players.map(p => ({
+                        name: p.name,
+                        score: p.score || p.currentScore || p.totalScore || 0,
+                        role: p.isDealer ? 'Dealer' : 'Player'
+                    }));
+                    
+                    //  USE THE PROPER SORTING FUNCTION
+                    updateScoreboard(updatedScores, { name: playerName, scoreGained: scoreGained });
+                }
+                
+                //  UPDATE PLAYER NAME DISPLAY WITH SIZE CONSTRAINTS
+                const playerNameDisplay = document.getElementById('playerNameDisplay');
+                if (playerNameDisplay) {
+                    playerNameDisplay.style.maxWidth = '100%';
+                    playerNameDisplay.style.overflow = 'hidden';
+                    playerNameDisplay.style.textOverflow = 'ellipsis';
+                    
+                    playerNameDisplay.innerHTML = `
+                        <div style="color: #28a745; font-weight: bold; font-size: 1em; margin-bottom: 5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis;">
+                             ${playerName} answered!
+                        </div>
+                        <div style="font-size: 0.8em; color: #6c757d; max-width: 100%; overflow: hidden; text-overflow: ellipsis;">
+                            ${isCorrect ? 'Correct' : 'Incorrect'} • +${scoreGained} pts • Total: ${newScore}
+                        </div>
+                    `;
+                }
+                
+                // Clear current player indicator after 3 seconds
+                setTimeout(() => {
+                    if (playerNameDisplay) {
+                        playerNameDisplay.innerHTML = '';
+                    }
+                    
+                    // Show options grid again for next question
+                    if (optionsGrid) {
+                        optionsGrid.style.display = 'grid';
+                    }
+                }, 3000);
+            });
+
+            // Helper function to update scoreboard
+            function updatePlayerScore(playerName, newScore) {
+                const scoreRows = document.querySelectorAll('.score-table tr');
+                scoreRows.forEach(row => {
+                    const nameCell = row.querySelector('td:first-child');
+                    if (nameCell && nameCell.textContent === playerName) {
+                        const scoreCell = row.querySelector('td:nth-child(2)');
+                        if (scoreCell) {
+                            scoreCell.textContent = newScore;
+                            // Add visual feedback
+                            scoreCell.style.background = '#28a745';
+                            scoreCell.style.color = 'white';
+                            setTimeout(() => {
+                                scoreCell.style.background = '';
+                                scoreCell.style.color = '';
+                            }, 1000);
+                        }
+                    }
+                });
+            }
+
+            // Handler for answer received (when player submits answer)
+            socket.on('answerReceived', (data) => {
+                console.log('📝 Answer received:', data);
+                
+                const { playerName, answerSubmitted, waitingForNext } = data;
+                
+                if (answerSubmitted) {
+                    //  ONLY UPDATE PLAYER NAME DISPLAY - NO LAYOUT CHANGES
+                    const playerNameDisplay = document.getElementById('playerNameDisplay');
+                    if (playerNameDisplay) {
+                        playerNameDisplay.innerHTML = `
+                            <div style="color: #28a745; font-weight: bold; font-size: 1em; margin-bottom: 5px; display: flex; align-items: center; gap: 8px;">
+                                <span style="background: #28a745; color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 0.8em;">✓</span>
+                                ${playerName} submitted answer!
+                            </div>
+                            <div style="font-size: 0.8em; color: #6c757d; font-style: italic;">
+                                ⏳ Processing answer... Results coming soon
+                            </div>
+                        `;
+                        
+                        //  CLEAR AFTER 4 SECONDS (before playerAnswered event)
+                        setTimeout(() => {
+                            if (playerNameDisplay.textContent.includes(playerName)) {
+                                playerNameDisplay.innerHTML = `
+                                    <div style="color: #6c757d; font-style: italic;">
+                                        Processing answer...
+                                    </div>
+                                `;
+                            }
+                        }, 4000);
+                    }
+                    
+                    //  OPTIONAL: ADD SMALL VISUAL FEEDBACK TO TIMER
+                    const timerElement = document.getElementById('timer');
+                    if (timerElement) {
+                        // Briefly highlight timer to show answer was received
+                        const originalStyle = timerElement.style.cssText;
+                        timerElement.style.background = 'linear-gradient(135deg, #28a745, #20c997)';
+                        timerElement.style.transform = 'scale(1.05)';
+                        
+                        setTimeout(() => {
+                            timerElement.style.cssText = originalStyle;
+                        }, 1000);
+                    }
+                }
+            });
+
+            // Round complete handler
+            socket.on('roundComplete', (data) => {
+                console.log('🏁 Round completed:', data);
+                
+                const { completedRound, nextRound, scores } = data;
+                
+                //  ONLY UPDATE QUESTION AREA - PRESERVE SCOREBOARD & PLAYERS
+                const questionText = document.getElementById('questionText');
+                if (questionText) {
+                    questionText.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <h2>🏁 Round ${completedRound} Complete!</h2>
+                            
+                            <div style="background: #d4edda; color: #155724; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                <h4>📊 Round ${completedRound} Results:</h4>
+                                ${scores.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 3).map((player, index) => `
+                                    <div style="padding: 5px; margin: 3px 0;">
+                                        ${index + 1}. ${player.name} ${player.role === 'Dealer' ? '👑' : '🎮'}: ${player.score || 0} points
+                                    </div>
+                                `).join('')}
+                            </div>
+                            
+                            <div style="background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                                ${nextRound <= 5 ? 
+                                    `<p>🎯 Round ${nextRound} starting soon...</p>` :
+                                    `<p>🏆 All rounds complete! Final results...</p>`
+                                }
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                //  UPDATE ROUND INFO
+                const roundInfo = document.querySelector('.round-info h2');
+                if (roundInfo) {
+                    roundInfo.textContent = `Round: ${completedRound}/5`;
+                }
+                
+                //  UPDATE SCOREBOARD WITH FINAL SCORES
+                updateScoreboard(scores);
+                
+                //  CLEAR CURRENT PLAYER DISPLAY
+                const playerNameDisplay = document.getElementById('playerNameDisplay');
+                if (playerNameDisplay) {
+                    playerNameDisplay.innerHTML = `
+                        <div style="color: #6c757d; font-style: italic;">
+                            Round ${completedRound} finished
+                        </div>
+                    `;
+                }
+                
+                //  PRESERVE ALL OTHER LAYOUT ELEMENTS
+            });
+
+            // Next round starting handler
+            socket.on('nextRoundStarting', (data) => {
+                console.log('🎯 Next round starting:', data);
+                
+                const { round } = data;
+                
+                //  ONLY UPDATE QUESTION AREA - PRESERVE SCOREBOARD & PLAYERS
+                const questionText = document.getElementById('questionText');
+                if (questionText) {
+                    questionText.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <h2>🎯 Round ${round} Starting!</h2>
+                            <div style="background: #d1ecf1; color: #0c5460; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                <p>Get ready for the next set of questions!</p>
+                                <p>📚 Loading new questions for this round...</p>
+                            </div>
+                            <div style="background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                                <p>⏳ Round will begin in a few seconds...</p>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                //  UPDATE ROUND INFO (PRESERVE EXISTING ELEMENT)
+                const roundInfo = document.querySelector('.round-info h2');
+                if (roundInfo) {
+                    roundInfo.textContent = `Round: ${round}/5`;
+                }
+                
+                //  ENSURE QUESTION AREA IS VISIBLE
+                const questionArea = document.getElementById('questionArea');
+                if (questionArea) {
+                    questionArea.style.display = 'block';
+                }
+                
+                //  CLEAR OPTIONS GRID BUT KEEP THE ELEMENT
+                const optionsGrid = document.getElementById('optionsGrid');
+                if (optionsGrid) {
+                    optionsGrid.innerHTML = '<div style="text-align: center; color: #6c757d; font-style: italic;">Questions loading...</div>';
+                }
+                
+                //  UPDATE PLAYER NAME DISPLAY
+                const playerNameDisplay = document.getElementById('playerNameDisplay');
+                if (playerNameDisplay) {
+                    playerNameDisplay.innerHTML = `
+                        <div style="color: #007bff; font-style: italic;">
+                            Round ${round} starting...
+                        </div>
+                    `;
+                }
+                
+                //  PRESERVE ALL OTHER LAYOUT ELEMENTS (scoreboard, dealer icon, player icons)
+            });
+
+            // Game complete handler (you already have this in mobile)
+            socket.on('gameComplete', (data) => {
+                console.log('🏁 Game completed:', data);
+                // Your existing game complete code...
+            });
+
+            function checkLayoutIntegrity() {
+            const elements = [
+                'scoreboardBody',
+                'dealerIcon', 
+                'playerIcons',
+                'questionText',
+                'optionsGrid',
+                'timer'
+            ];
+                elements.forEach(id => {
+                    const element = document.getElementById(id);
+                    console.log(`${id}: ${element ? ' Present' : '❌ Missing'}`);
+                });
+            }
+
+            // Handler for round scanning completion
+            socket.on('newRoundCardScanning', (data) => {
+                console.log('📱 New round card scanning - preserving layout:', data);
+    
+                const { round, totalRounds, message, currentScores } = data;
+                
+                //  UPDATE CURRENT GAME DATA WITH CORRECT ROUND
+                if (currentGameData) {
+                    currentGameData.currentRound = round;
+                }
+                
+                // Reset scan progress tracking for new round
+                playerScanProgress = {};
+                
+                //  ONLY UPDATE THE QUESTION AREA - PRESERVE EVERYTHING ELSE
+                const questionText = document.getElementById('questionText');
+                if (questionText) {
+                    questionText.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <h4>📱 Round ${round} - Card Scanning</h4>
+                            <p>${message}</p>
+                            <div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                                <p> New cards distributed</p>
+                                <p>📱 Scanning in progress...</p>
+                            </div>
+                            
+                            <div style="background: #e7f3ff; color: #0c5460; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                                <h4>Current Scores After Round ${round - 1}:</h4>
+                                ${currentScores ? currentScores.map(player => 
+                                    `<p><strong>${player.name} (${player.role}):</strong> ${player.score} points</p>`
+                                ).join('') : '<p>Loading scores...</p>'}
+                            </div>
+                            
+                            <div id="roundScanProgress">
+                                <h4>📱 Scanning Progress:</h4>
+                                <p>Waiting for players to scan new cards...</p>
+                                <p>Round ${round} of ${totalRounds}</p>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                //  UPDATE ROUND INFO (PRESERVE EXISTING ELEMENT)
+                const roundInfo = document.querySelector('.round-info h2');
+                if (roundInfo) {
+                    roundInfo.textContent = `Round: ${round}/5`;
+                }
+                
+                //  UPDATE SCOREBOARD WITH PRESERVED SCORES
+                if (currentScores) {
+                    updateScoreboard(currentScores);
+                }
+                
+                //  CLEAR OPTIONS GRID BUT KEEP THE ELEMENT
+                const optionsGrid = document.getElementById('optionsGrid');
+                if (optionsGrid) {
+                    optionsGrid.innerHTML = '';
+                }
+                
+                //  ENSURE QUESTION AREA IS VISIBLE
+                const questionArea = document.getElementById('questionArea');
+                if (questionArea) {
+                    questionArea.style.display = 'block';
+                }
+                
+                //  PRESERVE ALL LAYOUT ELEMENTS
+                setTimeout(() => checkLayoutIntegrity(), 1000);
+            });
+
+            function manuallyStartQuestions() {
+                console.log('🎯 Manually starting questions phase...');
+                
+                const questionText = document.getElementById('questionText');
+                if (questionText) {
+                    questionText.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <h4>🎯 Starting Questions...</h4>
+                            <p>First player will receive their question shortly...</p>
+                        </div>
+                    `;
+                }
+                
+                socket.emit('requestNextQuestion', {
+                    sessionId: sessionId,
+                    currentRound: 1,
+                    manualStart: true
+                });
+            }
+            // Handler for player scanned card in specific round
+            socket.on('playerScannedCardInRound', (data) => {
+                console.log('📱 Player scanned card in round:', data);
+                
+                const { round, player, cardData, totalScanned, isComplete, totalPlayersScanned, allPlayersFinished } = data;
+                
+                // Update scan progress for this round using player name (not socket ID)
+                const playerName = player.name;
+                const playerId = player.id || player.name;
+                
+                // Store progress by player name for better display
+                if (!playerScanProgress) playerScanProgress = {};
+                playerScanProgress[playerName] = {
+                    id: playerId,
+                    name: playerName,
+                    role: player.role || (player.isDealer ? 'Dealer' : 'Player'),
+                    scannedCount: totalScanned,
+                    isComplete: isComplete
+                };
+                
+                console.log('📊 Updated scan progress:', playerScanProgress);
+                
+                // Update progress display
+                const progressDiv = document.getElementById('roundScanProgress');
+                if (progressDiv) {
+                    //  USE CORRECT TOTAL PLAYER COUNT
+                    const totalPlayers = currentGameData?.players?.length || Object.keys(playerScanProgress).length;
+                    
+                    progressDiv.innerHTML = `
+                        <h4>📱 Round ${round} Scanning Progress:</h4>
+                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                            <p><strong>Players Completed:</strong> ${totalPlayersScanned}/${totalPlayers}</p>
+                            
+                            ${Object.values(playerScanProgress).map(playerData => {
+                                const status = playerData.scannedCount >= 2 ? ' Complete' : `⏳ ${playerData.scannedCount}/2 cards`;
+                                const statusClass = playerData.scannedCount >= 2 ? 'scan-complete' : 'scan-pending';
+                                
+                                return `
+                                    <div class="scan-player-item ${statusClass}" style="display: flex; justify-content: space-between; padding: 10px; margin: 5px 0; border-radius: 5px; background: ${playerData.scannedCount >= 2 ? '#d4edda' : '#fff3cd'};">
+                                        <strong>${playerData.role} ${playerData.name}:</strong>
+                                        <span class="scan-status">${status}</span>
+                                    </div>
+                                `;
+                            }).join('')}
+                            
+                            ${allPlayersFinished ? 
+                                '<div style="background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin-top: 15px;"><strong> All players finished scanning!</strong></div>' : 
+                                '<p style="color: #6c757d; font-style: italic;">Waiting for remaining players...</p>'
+                            }
+                        </div>
+                    `;
+                }
+                
+                // Also update the old scan progress if it exists (for compatibility)
+                const scanProgress = document.getElementById('scanProgress');
+                if (scanProgress) {
+                    const scannedCount = document.getElementById('scannedPlayersCount');
+                    if (scannedCount) {
+                        scannedCount.textContent = totalPlayersScanned;
+                    }
+                    
+                    // Check if progress line already exists for this player
+                    const existingProgress = scanProgress.querySelector(`[data-player="${playerName}"]`);
+                    if (existingProgress) {
+                        // Update existing line
+                        existingProgress.innerHTML = ` ${player.role} ${playerName}: ${totalScanned}/2 cards`;
+                    } else {
+                        // Add new line
+                        const progressLine = document.createElement('p');
+                        progressLine.setAttribute('data-player', playerName);
+                        progressLine.innerHTML = ` ${player.role} ${playerName}: ${totalScanned}/2 cards`;
+                        scanProgress.appendChild(progressLine);
+                    }
+                }
+                
+                // If all players finished, prepare for questions
+                if (allPlayersFinished) {
+                    setTimeout(() => {
+                        console.log('All players finished scanning - questions starting soon...');
+                    }, 2000);
+                }
+            });
+
+            // Handler for round card comparison results
+            socket.on('roundCardComparison', (data) => {
+                console.log('🎯 Round card comparison:', data);
+                
+                const { roundCompleted, dealerCardValue, dealerName, results, summary } = data;
+                
+                //  ONLY UPDATE THE QUESTION AREA - PRESERVE EVERYTHING ELSE
+                const questionText = document.getElementById('questionText');
+                if (questionText) {
+                    questionText.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <h2>🎯 Round ${roundCompleted} Card Comparison</h2>
+                            
+                            <div style="background: #e7f3ff; color: #0c5460; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                <h3>🎴 Dealer: ${dealerName}</h3>
+                                <p><strong>Dealer's Highest Card:</strong> ${dealerCardValue}</p>
+                            </div>
+                            
+                            <div style="background: #f8f9fa; color: #495057; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                <h4>🃏 Round ${roundCompleted} Card Results:</h4>
+                                ${results.map(result => `
+                                    <div style="padding: 15px; margin: 10px 0; border-radius: 8px; background: ${result.beatsDealer ? '#d4edda' : '#f8d7da'}; color: ${result.beatsDealer ? '#155724' : '#721c24'}; border: 2px solid ${result.beatsDealer ? '#28a745' : '#dc3545'};">
+                                        <strong style="font-size: 1.1em;">${result.playerName} (${result.role}):</strong><br>
+                                        <div style="margin: 8px 0; font-size: 1.05em;">
+                                            📱 Card Value: <strong>${result.playerCardValue}</strong> vs 🎴 Dealer: <strong>${result.dealerCardValue}</strong>
+                                        </div>
+                                        ${result.beatsDealer ? 
+                                            `<div style="background: rgba(40, 167, 69, 0.2); padding: 8px; border-radius: 5px; margin: 8px 0;">
+                                                🎉 <strong>WINS!</strong> Higher card beats dealer!<br>
+                                                💰 <strong>+${result.bonusAwarded} BONUS POINTS!</strong>
+                                            </div>` : 
+                                            `<div style="background: rgba(220, 53, 69, 0.2); padding: 8px; border-radius: 5px; margin: 8px 0;">
+                                                😔 Card not high enough - no bonus this round
+                                            </div>`
+                                        }
+                                        <div style="font-size: 1.1em; font-weight: bold; margin-top: 10px;">
+                                            📊 New Total Score: <span style="color: #007bff;">${result.newScore} points</span>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                            
+                            <div style="background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0; border: 2px solid #ffc107;">
+                                <h4>🏆 Round ${roundCompleted} Summary:</h4>
+                                <p><strong>💰 Bonus Rule:</strong> ${summary.bonusRule || '+10 points for higher card value'}</p>
+                                <p><strong>🎯 Players beating dealer:</strong> ${summary.playersBeatingDealer}</p>
+                                <p><strong>💵 Total bonus points awarded:</strong> ${summary.totalBonusAwarded} points</p>
+                            </div>
+                            
+                            <div style="background: #d1ecf1; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                                <p style="font-style: italic;">🔄 Next round starting soon...</p>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                //  UPDATE ROUND INFO (PRESERVE EXISTING ELEMENT)
+                const roundInfo = document.querySelector('.round-info h2');
+                if (roundInfo) {
+                    roundInfo.textContent = `Round: ${roundCompleted}/5`;
+                }
+                
+                //  UPDATE SCOREBOARD WITH NEW SCORES (including +10 bonuses)
+                if (currentGameData && currentGameData.players) {
+                    // Update local game data with new scores
+                    results.forEach(result => {
+                        const player = currentGameData.players.find(p => p.name === result.playerName);
+                        if (player) {
+                            player.score = result.newScore;
+                            player.currentScore = result.newScore;
+                            player.totalScore = result.newScore;
+                        }
+                    });
+                    
+                    // Update scoreboard with new scores
+                    updateScoreboard(currentGameData.players);
+                }
+                
+                //  PRESERVE ALL OTHER LAYOUT ELEMENTS
+            });
+
+            // Function to confirm card distribution (add this function)
+            function confirmCardDistribution(round) {
+                console.log(`Host confirmed card distribution for Round ${round}`);
+                
+                //  ONLY UPDATE THE QUESTION AREA - PRESERVE EVERYTHING ELSE
+                const questionText = document.getElementById('questionText');
+                if (questionText) {
+                    questionText.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <h2>📱 Round ${round} - Card Scanning</h2>
+                            
+                            <div style="background: #d4edda; color: #155724; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                <h3> Cards Distributed!</h3>
+                                <p>All players should now scan their new cards for Round ${round}</p>
+                            </div>
+                            
+                            <div id="roundScanProgress">
+                                <h4>📱 Scanning Progress:</h4>
+                                <p>⏳ Waiting for players to scan their new cards...</p>
+                                <p>This will update automatically as players scan</p>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                //  UPDATE ROUND INFO (PRESERVE EXISTING ELEMENT)
+                const roundInfo = document.querySelector('.round-info h2');
+                if (roundInfo) {
+                    roundInfo.textContent = `Round: ${round}/5`;
+                }
+                
+                //  ENSURE QUESTION AREA IS VISIBLE
+                const questionArea = document.getElementById('questionArea');
+                if (questionArea) {
+                    questionArea.style.display = 'block';
+                }
+                
+                //  CLEAR OPTIONS GRID BUT KEEP THE ELEMENT
+                const optionsGrid = document.getElementById('optionsGrid');
+                if (optionsGrid) {
+                    optionsGrid.innerHTML = '';
+                }
+                
+                //  RESET PROGRESS TRACKING
+                playerScanProgress = {};
+                
+                //  PRESERVE ALL OTHER LAYOUT ELEMENTS (scoreboard, dealer icon, player icons)
+            }
+
+            // Enhanced function to show new round card scan message
+            function showNewRoundCardScanMessage(round, totalRounds) {
+                const overlay = document.getElementById('cardScanOverlay');
+                
+                // Update overlay content for new round
+                overlay.querySelector('.overlay-content').innerHTML = `
+                    <div>📱</div>
+                    <div>Round ${round} of ${totalRounds}</div>
+                    <div>Scan your NEW allocated cards</div>
+                `;
+                
+                overlay.classList.add('show');
+                
+                // Hide after 4 seconds
+                setTimeout(() => {
+                    overlay.classList.remove('show');
+                }, 4000);
+            }
+
+            socket.on('scoreboardUpdate', (data) => {
+                console.log('📊 Scoreboard update received:', data);
+                
+                const { updatedPlayer, allScores, currentRound } = data;
+                
+                // Update the scoreboard with new data
+                updateScoreboard(allScores, updatedPlayer, currentRound);
+                
+                // Show score animation if points were gained
+                if (updatedPlayer && updatedPlayer.scoreGained > 0) {
+                    showScoreAnimation(updatedPlayer.name, updatedPlayer.scoreGained, updatedPlayer.bonusPoints);
+                }
+            });
+
+            function showScoreAnimation(playerName, scoreGained, bonusPoints) {
+                const animationElement = document.createElement('div');
+                animationElement.style.cssText = `
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: linear-gradient(135deg, #28a745, #20c997);
+                    color: white;
+                    padding: 20px 30px;
+                    border-radius: 15px;
+                    font-size: 18px;
+                    font-weight: bold;
+                    text-align: center;
+                    z-index: 9999;
+                    box-shadow: 0 8px 25px rgba(40, 167, 69, 0.4);
+                    animation: scorePopIn 0.6s ease-out;
+                `;
+                
+                animationElement.innerHTML = `
+                    <div style="margin-bottom: 5px;">🎉 ${playerName}</div>
+                    <div style="font-size: 1.3em;">+${scoreGained} Points!</div>
+                    ${bonusPoints > 0 ? `<div style="font-size: 0.9em; margin-top: 5px;">Including +${bonusPoints} bonus!</div>` : ''}
+                `;
+                
+                document.body.appendChild(animationElement);
+                
+                // Remove animation after 2.5 seconds
+                setTimeout(() => {
+                    if (animationElement.parentNode) {
+                        animationElement.parentNode.removeChild(animationElement);
+                    }
+                }, 2500);
+            }
+
+            socket.on('startNewRoundCardDistribution', (data) => {
+                console.log('🎴 New round card distribution - keeping simple view');
+                
+                const { round, players } = data;
+                
+                //  JUST UPDATE THE QUESTION AREA (NO OVERLAY)
+                const questionText = document.getElementById('questionText');
+                if (questionText) {
+                    questionText.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <h4>🎴 Round ${round} Starting</h4>
+                            <p>Players are receiving new cards...</p>
+                            <div style="background: #e7f3ff; color: #0c5460; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                                <p>📱 Card scanning will begin automatically</p>
+                                <p>⏳ Please wait for scanning to complete</p>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                //  UPDATE ROUND INFO
+                const roundInfo = document.querySelector('.round-info h2');
+                if (roundInfo) {
+                    roundInfo.textContent = `Round: ${round}/5`;
+                }
+                
+                //  UPDATE SCOREBOARD
+                if (players) {
+                    updateScoreboard(players.map(p => ({
+                        name: p.name,
+                        score: p.currentScore || 0,
+                        isDealer: p.role === 'Dealer'
+                    })));
+                }
+                
+                //  NO OVERLAY CREATION - KEEP ORIGINAL LAYOUT
+            });
+
+            socket.on('allPlayersAnsweredInRound', (data) => {
+                console.log('🎯 All players answered in round - starting card comparison:', data);
+                
+                const { round, players, dealerName } = data;
+                
+                //  UPDATE QUESTION AREA TO SHOW CARD COMPARISON IS STARTING
+                const questionText = document.getElementById('questionText');
+                if (questionText) {
+                    questionText.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <h3>🃏 Round ${round} Questions Complete!</h3>
+                            <div style="background: #d4edda; color: #155724; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                <p> All players have answered their questions</p>
+                                <p>🃏 Now comparing cards with dealer...</p>
+                            </div>
+                            <div style="background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                                <p>⏳ Card comparison in progress...</p>
+                                <p>Dealer: ${dealerName}</p>
+                                <p><strong>Bonus Rule:</strong> Players with higher card values get +10 bonus points!</p>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                //  EMIT REQUEST FOR CARD COMPARISON WITH +10 BONUS RULE
+                socket.emit('requestCardComparison', {
+                    sessionId: sessionId,
+                    round: round,
+                    players: players,
+                    dealerName: dealerName,
+                    bonusPoints: 10 // +10 for beating dealer
+                });
+            });
+
+            function showBonusAnimation(playerName, bonusPoints) {
+                const animationElement = document.createElement('div');
+                animationElement.style.cssText = `
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: linear-gradient(135deg, #ffc107, #fd7e14);
+                    color: white;
+                    padding: 25px 35px;
+                    border-radius: 20px;
+                    font-size: 20px;
+                    font-weight: bold;
+                    text-align: center;
+                    z-index: 9999;
+                    box-shadow: 0 10px 30px rgba(255, 193, 7, 0.5);
+                    animation: bonusPopIn 0.8s ease-out;
+                    border: 3px solid #fff;
+                `;
+                
+                animationElement.innerHTML = `
+                    <div style="margin-bottom: 8px; font-size: 1.2em;">🎴 ${playerName}</div>
+                    <div style="font-size: 1.5em; color: #fff;">+${bonusPoints} CARD BONUS!</div>
+                    <div style="font-size: 0.9em; margin-top: 8px; opacity: 0.9;">Higher card beats dealer!</div>
+                `;
+                
+                document.body.appendChild(animationElement);
+                
+                // Remove animation after 3 seconds
+                setTimeout(() => {
+                    if (animationElement.parentNode) {
+                        animationElement.parentNode.removeChild(animationElement);
+                    }
+                }, 3000);
+            }
+
+            //  ADD CSS animation for bonus popup
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes bonusPopIn {
+                    0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+                    50% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+                    100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+                }
+            `;
+            document.head.appendChild(style);
+        
